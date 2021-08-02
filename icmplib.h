@@ -2,23 +2,46 @@
 #define ICMPLIB_PING_DATA_SIZE 64
 #endif
 
-#ifndef ICMPLIB_PING_DATA_SIZE
-#define ICMPLIB_PING_DATA_SIZE 64
-#endif
-
 #include <exception>
 #include <chrono>
 #include <string>
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#else
+#include <sys/socket.h>
+//#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <cstring>
+#include <climits>
+#endif
 
 #define ICMPLIB_IPV4_HEADER_SIZE 20
+#ifdef _WIN32
+#define ICMPLIB_SOCKET SOCKET
+#define ICMPLIB_SOCKADDR SOCKADDR
+#define ICMPLIB_SOCKADDR_IN SOCKADDR_IN
+#define ICMPLIB_SOCKETADDR_LENGTH int
+#define ICMPLIB_SOCKET_ERROR SOCKET_ERROR
+#define ICMPLIB_INETPTON InetPtonA
+#define ICMPLIB_CLOSESOCKET closesocket
+#else
+#define ICMPLIB_SOCKET int
+#define ICMPLIB_SOCKADDR sockaddr
+#define ICMPLIB_SOCKADDR_IN sockaddr_in
+#define ICMPLIB_SOCKETADDR_LENGTH socklen_t
+#define ICMPLIB_SOCKET_ERROR -1
+#define ICMPLIB_INETPTON inet_pton
+#define ICMPLIB_CLOSESOCKET close
+#endif
 
 #if (defined _WIN32 && defined _MSC_VER)
 #pragma comment(lib, "ws2_32.lib")
 #endif
 
 namespace icmplib {
+#ifdef _WIN32
     class WinSock {
     public:
         WinSock(const WinSock &) = delete;
@@ -44,7 +67,7 @@ namespace icmplib {
             }
         }
     };
-
+#endif
     class Echo {
     public:
         Echo() = delete;
@@ -52,23 +75,30 @@ namespace icmplib {
         Echo(Echo &&) = delete;
         Echo &operator=(const Echo &) = delete;
         static unsigned Execute(const std::string &ipv4, unsigned ttl = 255) {
-            WinSock::Initialize();
+#ifdef _WIN32
+			WinSock::Initialize();
+#endif	
 
-            SOCKADDR_IN address;
-            std::memset(&address, 0, sizeof(SOCKADDR_IN));
+            ICMPLIB_SOCKADDR_IN address;
+            std::memset(&address, 0, sizeof(ICMPLIB_SOCKADDR_IN));
             address.sin_family = AF_INET;
             address.sin_port = htons(53);
-            if (InetPtonA(AF_INET, ipv4.c_str(), &address.sin_addr) != TRUE) {
+
+            if (ICMPLIB_INETPTON(AF_INET, ipv4.c_str(), &address.sin_addr) <= 0) {
                 throw std::runtime_error("Wrong IP address passed!");
             }
 
-            SOCKET sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+            ICMPLIB_SOCKET sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+#ifdef _WIN32
             if (sock == INVALID_SOCKET) {
+#else
+            if (sock <= 0) {
+#endif	
                 throw std::runtime_error("Cannot initialize socket!");
             }
 
-            if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(ttl)) == SOCKET_ERROR) {
-                closesocket(sock);
+            if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(ttl)) == ICMPLIB_SOCKET_ERROR) {
+				ICMPLIB_CLOSESOCKET(sock);
                 throw std::runtime_error("Cannot set socket options!");
             }
 
@@ -77,33 +107,33 @@ namespace icmplib {
             request.header.id = rand() % USHRT_MAX;
             request.header.type = 8;
             SetChecksum(request);
-            int bytes = sendto(sock, reinterpret_cast<char *>(&request), sizeof(ICMPEchoMessage), 0, reinterpret_cast<SOCKADDR *>(&address), sizeof(SOCKADDR_IN));
-            if (bytes == SOCKET_ERROR) {
-                closesocket(sock);
+            int bytes = sendto(sock, reinterpret_cast<char *>(&request), sizeof(ICMPEchoMessage), 0, reinterpret_cast<ICMPLIB_SOCKADDR *>(&address), static_cast<ICMPLIB_SOCKETADDR_LENGTH>(sizeof(ICMPLIB_SOCKADDR_IN)));
+            if (bytes == ICMPLIB_SOCKET_ERROR) {
+				ICMPLIB_CLOSESOCKET(sock);
                 throw std::runtime_error("Error while sending data!");
             }
 
             auto start = std::chrono::high_resolution_clock::now();
 
-            int length = sizeof(SOCKADDR_IN);
-            std::memset(&address, 0, sizeof(SOCKADDR_IN));
+            ICMPLIB_SOCKETADDR_LENGTH length = sizeof(ICMPLIB_SOCKADDR_IN);
+            std::memset(&address, 0, sizeof(ICMPLIB_SOCKADDR_IN));
             char buffer[sizeof(ICMPEchoMessage) + ICMPLIB_IPV4_HEADER_SIZE];
-            bytes = recvfrom(sock, buffer, sizeof(ICMPEchoMessage) + ICMPLIB_IPV4_HEADER_SIZE, 0, reinterpret_cast<SOCKADDR *>(&address), &length);
-            if (bytes == SOCKET_ERROR) {
-                closesocket(sock);
+            bytes = recvfrom(sock, buffer, sizeof(ICMPEchoMessage) + ICMPLIB_IPV4_HEADER_SIZE, 0, reinterpret_cast<ICMPLIB_SOCKADDR *>(&address), &length);
+            if (bytes == ICMPLIB_SOCKET_ERROR) {
+				ICMPLIB_CLOSESOCKET(sock);
                 throw std::runtime_error("Error while receiving data!");
             }
             auto end = std::chrono::high_resolution_clock::now();
 
             ICMPEchoMessage response;
-            std::memcpy(&response, &buffer[ICMPLIB_IPV4_HEADER_SIZE], bytes - ICMPLIB_IPV4_HEADER_SIZE > sizeof(ICMPEchoMessage) ? sizeof(ICMPEchoMessage) : bytes - ICMPLIB_IPV4_HEADER_SIZE);
+            std::memcpy(&response, &buffer[ICMPLIB_IPV4_HEADER_SIZE], static_cast<long unsigned>(bytes) - ICMPLIB_IPV4_HEADER_SIZE > sizeof(ICMPEchoMessage) ? sizeof(ICMPEchoMessage) : bytes - ICMPLIB_IPV4_HEADER_SIZE);
             uint16_t checksum = response.header.checksum;
             response.header.checksum = 0;
             if ((checksum != SetChecksum(response)) || (request.header.id != response.header.id)) {
-                closesocket(sock);
+				ICMPLIB_CLOSESOCKET(sock);
                 throw std::runtime_error("Wrong host response!");
             }
-            closesocket(sock);
+			ICMPLIB_CLOSESOCKET(sock);
 
             return static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
         }
