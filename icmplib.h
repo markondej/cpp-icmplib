@@ -2,7 +2,6 @@
 #define ICMPLIB_PING_DATA_SIZE 64
 #endif
 
-#include <exception>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -81,35 +80,32 @@ namespace icmplib {
         }
     };
 #endif
-    class Echo {
+    class ICMPEcho {
     public:
         struct Result {
             enum class ResponseType {
                 Success,
                 Unreachable,
                 TimeExceeded,
-                Timeout
+                Timeout,
+                Unsupported,
+                Failure
             } response;
             double interval;
-            std::string host;
+            std::string ipv4;
             uint8_t code;
             uint8_t ttl;
         };
-        Echo() = delete;
-        Echo(const Echo &) = delete;
-        Echo(Echo &&) = delete;
-        Echo &operator=(const Echo &) = delete;
+        ICMPEcho() = delete;
+        ICMPEcho(const ICMPEcho &) = delete;
+        ICMPEcho(ICMPEcho &&) = delete;
+        ICMPEcho &operator=(const ICMPEcho &) = delete;
         static Result Execute(const std::string &ipv4, unsigned timeout = 60, uint8_t ttl = 255) {
 #ifdef _WIN32
             WinSock::Initialize();
 #endif
 
-            Result result;
-            result.host.empty();
-            result.interval = 0;
-            result.code = 0;
-            result.ttl = 0;
-            result.response = Result::ResponseType::Timeout;
+            Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), std::string(), 0, 0 };
 
             ICMPLIB_SOCKADDR_IN address;
             std::memset(&address, 0, sizeof(ICMPLIB_SOCKADDR_IN));
@@ -117,7 +113,7 @@ namespace icmplib {
             address.sin_port = htons(53);
 
             if (ICMPLIB_INETPTON(AF_INET, ipv4.c_str(), &address.sin_addr) <= 0) {
-                throw std::runtime_error("Wrong IP address passed!");
+                return { Result::ResponseType::Failure, 0, std::string(), 0, 0 };
             }
 
             ICMPLIB_SOCKET sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
@@ -131,7 +127,7 @@ namespace icmplib {
 
             if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(ttl)) == ICMPLIB_SOCKET_ERROR) {
                 ICMPLIB_CLOSESOCKET(sock);
-                throw std::runtime_error("Cannot set socket options!");
+                return { Result::ResponseType::Failure, 0, std::string(), 0, 0 };
             }
 
 #ifdef _WIN32
@@ -142,7 +138,7 @@ namespace icmplib {
             if ((flags == -1) || fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1) {
 #endif
                 ICMPLIB_CLOSESOCKET(sock);
-                throw std::runtime_error("Cannot set socket options!");
+                return { Result::ResponseType::Failure, 0, std::string(), 0, 0 };
             }
 
             ICMPEchoMessage request;
@@ -153,7 +149,7 @@ namespace icmplib {
             int bytes = sendto(sock, reinterpret_cast<char *>(&request), sizeof(ICMPEchoMessage), 0, reinterpret_cast<ICMPLIB_SOCKADDR *>(&address), static_cast<ICMPLIB_SOCKETADDR_LENGTH>(sizeof(ICMPLIB_SOCKADDR_IN)));
             if (bytes == ICMPLIB_SOCKET_ERROR) {
                 ICMPLIB_CLOSESOCKET(sock);
-                throw std::runtime_error("Error while sending data!");
+                return { Result::ResponseType::Failure, 0, std::string(), 0, 0 };
             }
 
             auto start = std::chrono::high_resolution_clock::now();
@@ -185,7 +181,7 @@ namespace icmplib {
                     result.interval = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
                     char addressBuffer[ICMPLIB_IPV4_ADDRESS_SIZE + 1];
                     if (ICMPLIB_INETNTOP(AF_INET, &address.sin_addr, addressBuffer, ICMPLIB_IPV4_ADDRESS_SIZE + 1) != NULL) {
-                        result.host = addressBuffer;
+                        result.ipv4 = addressBuffer;
                     }
                     result.code = header.code;
                     result.ttl = buffer[ICMPLIB_IPV4_TTL_OFFSET];
@@ -200,8 +196,7 @@ namespace icmplib {
                     initPacket(&response, sizeof(ICMPEchoMessage));
                     response.checksum = 0;
                     if ((checksum != SetChecksum(response, sizeof(ICMPEchoMessage))) || (request.id != response.id)) {
-                        ICMPLIB_CLOSESOCKET(sock);
-                        throw std::runtime_error("Wrong host response!");
+                        setResult(Result::ResponseType::Unsupported);
                     }                    
                     break;
                 case ICMPLIB_ICMP_DESTINATION_UNREACHABLE:
@@ -213,15 +208,13 @@ namespace icmplib {
                     initPacket(&reverted, sizeof(ICMPRevertedMessage));
                     reverted.checksum = 0;
                     if (checksum != SetChecksum(reverted, sizeof(ICMPRevertedMessage))) {
-                        ICMPLIB_CLOSESOCKET(sock);
-                        throw std::runtime_error("Wrong host response!");
+                        setResult(Result::ResponseType::Unsupported);
                     }
                     break;
                 case ICMPLIB_ICMP_ECHO_REQUEST:
                     continue;
                 default:
-                    ICMPLIB_CLOSESOCKET(sock);
-                    throw std::runtime_error("Unsupported response type!");
+                    setResult(Result::ResponseType::Unsupported);
                 }
                 break;
             }
@@ -263,7 +256,10 @@ namespace icmplib {
         };
     };
 
-    Echo::Result Ping(const std::string &ipv4, unsigned timeout = 60, uint8_t ttl = 255) {
-        return Echo::Execute(ipv4, timeout, ttl);
+    using PingResult = ICMPEcho::Result;
+    using PingResponseType = ICMPEcho::Result::ResponseType;
+
+    PingResult Ping(const std::string &ipv4, unsigned timeout = 60, uint8_t ttl = 255) {
+        return ICMPEcho::Execute(ipv4, timeout, ttl);
     }
 }

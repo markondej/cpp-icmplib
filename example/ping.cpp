@@ -1,32 +1,35 @@
 ﻿#include <iostream>
 #include "icmplib.h"
 
-int main()
+int main(int argc, char *argv[])
 {
+    int ret = 0;
     std::string address = "8.8.8.8";
+    if (argc > 1) { address = argv[1]; }
     std::cout << "Pinging " << address << " with " << ICMPLIB_PING_DATA_SIZE << " bytes of data:" << std::endl;
-    try {
-        auto result = icmplib::Ping(address);
-        if (result.response != icmplib::Echo::Result::ResponseType::Timeout) {
-            std::cout << "Reply from " << result.host << ": ";
-            switch (result.response) {
-            case icmplib::Echo::Result::ResponseType::Success:
-                std::cout << "time=" << result.interval << " TTL=" << static_cast<unsigned>(result.ttl);
-                break;
-            case icmplib::Echo::Result::ResponseType::Unreachable:
-                std::cout << "Destination unreachable.";
-                break;
-            case icmplib::Echo::Result::ResponseType::TimeExceeded:
-                std::cout << "Time exceeded.";
-                break;
-            }
-        } else {
-            std::cout << "Request timed out.";
+    auto result = icmplib::Ping(address);
+    switch (result.response) {
+    case icmplib::PingResponseType::Failure:
+        std::cout << "Network error." << std::endl;
+        ret = 1;
+        break;
+    case icmplib::PingResponseType::Timeout:
+        std::cout << "Request timed out." << std::endl;
+        break;
+    default:
+        std::cout << "Reply from " << result.ipv4 << ": ";
+        switch (result.response) {
+        case icmplib::PingResponseType::Success:
+            std::cout << "time=" << result.interval << " TTL=" << static_cast<unsigned>(result.ttl);
+            break;
+        case icmplib::PingResponseType::Unreachable:
+            std::cout << "Destination unreachable.";
+            break;
+        case icmplib::PingResponseType::TimeExceeded:
+            std::cout << "Time exceeded.";
+            break;
         }
         std::cout << std::endl;
-    } catch (std::exception &e) {
-        std::cout << "Network error." << std::endl;
-        return 1;
     }
-    return 0;
+    return ret;
 }
