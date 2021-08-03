@@ -18,15 +18,16 @@
 #include <climits>
 #endif
 
-#define ICMPLIB_ICMP_ECHO_REQUEST 8
 #define ICMPLIB_ICMP_ECHO_RESPONSE 0
 #define ICMPLIB_ICMP_DESTINATION_UNREACHABLE 3
+#define ICMPLIB_ICMP_ECHO_REQUEST 8
+#define ICMPLIB_ICMP_TIME_EXCEEDED 11
 
 #define ICMPLIB_IPV4_ADDRESS_SIZE 16
 #define ICMPLIB_IPV4_HEADER_SIZE 20
 #define ICMPLIB_IPV4_TTL_OFFSET 8
 #define ICMPLIB_RECV_BUFFER_SIZE 1024
-#define ICMPLIB_UNREACHABLE_ORIGINAL_DATA_SIZE ICMPLIB_IPV4_HEADER_SIZE + 8
+#define ICMPLIB_ORIGINAL_DATA_SIZE ICMPLIB_IPV4_HEADER_SIZE + 8
 
 #ifdef _WIN32
 #define ICMPLIB_SOCKET SOCKET
@@ -86,10 +87,12 @@ namespace icmplib {
             enum class ResponseType {
                 Success,
                 Unreachable,
+                TimeExceeded,
                 Timeout
             } response;
             double interval;
             std::string host;
+            uint8_t code;
             uint8_t ttl;
         };
         Echo() = delete;
@@ -99,11 +102,12 @@ namespace icmplib {
         static Result Execute(const std::string &ipv4, unsigned timeout = 60, uint8_t ttl = 255) {
 #ifdef _WIN32
             WinSock::Initialize();
-#endif	
+#endif
 
             Result result;
             result.host.empty();
             result.interval = 0;
+            result.code = 0;
             result.ttl = 0;
             result.response = Result::ResponseType::Timeout;
 
@@ -173,6 +177,9 @@ namespace icmplib {
                     std::memcpy(packet, &buffer[ICMPLIB_IPV4_HEADER_SIZE], static_cast<long unsigned>(bytes) - ICMPLIB_IPV4_HEADER_SIZE > length ? length : static_cast<long unsigned>(bytes) - ICMPLIB_IPV4_HEADER_SIZE);
                 };
 
+                ICMPHeader header;
+                initPacket(&header, sizeof(ICMPHeader));
+
                 auto setResult = [&](Result::ResponseType response) {
                     result.response = response;
                     result.interval = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
@@ -180,32 +187,35 @@ namespace icmplib {
                     if (ICMPLIB_INETNTOP(AF_INET, &address.sin_addr, addressBuffer, ICMPLIB_IPV4_ADDRESS_SIZE + 1) != NULL) {
                         result.host = addressBuffer;
                     }
+                    result.code = header.code;
                     result.ttl = buffer[ICMPLIB_IPV4_TTL_OFFSET];
                 };
 
-                ICMPHeader header;
-                initPacket(&header, sizeof(ICMPHeader));
                 ICMPEchoMessage response;
-                ICMPUnreachableMessage unreachable;
+                ICMPRevertedMessage reverted;
                 uint16_t checksum = header.checksum;
                 switch (header.type) {
                 case ICMPLIB_ICMP_ECHO_RESPONSE:
+                    setResult(Result::ResponseType::Success);
                     initPacket(&response, sizeof(ICMPEchoMessage));
                     response.checksum = 0;
                     if ((checksum != SetChecksum(response, sizeof(ICMPEchoMessage))) || (request.id != response.id)) {
                         ICMPLIB_CLOSESOCKET(sock);
                         throw std::runtime_error("Wrong host response!");
                     }                    
-                    setResult(Result::ResponseType::Success);
                     break;
                 case ICMPLIB_ICMP_DESTINATION_UNREACHABLE:
-                    initPacket(&unreachable, sizeof(ICMPUnreachableMessage));
-                    unreachable.checksum = 0;
-                    if (checksum != SetChecksum(unreachable, sizeof(ICMPUnreachableMessage))) {
+                    setResult(Result::ResponseType::Unreachable);
+                case ICMPLIB_ICMP_TIME_EXCEEDED:
+                    if (result.response == Result::ResponseType::Timeout) {
+                        setResult(Result::ResponseType::TimeExceeded);
+                    }
+                    initPacket(&reverted, sizeof(ICMPRevertedMessage));
+                    reverted.checksum = 0;
+                    if (checksum != SetChecksum(reverted, sizeof(ICMPRevertedMessage))) {
                         ICMPLIB_CLOSESOCKET(sock);
                         throw std::runtime_error("Wrong host response!");
                     }
-                    setResult(Result::ResponseType::Unreachable);
                     break;
                 case ICMPLIB_ICMP_ECHO_REQUEST:
                     continue;
@@ -232,9 +242,9 @@ namespace icmplib {
             uint8_t data[ICMPLIB_PING_DATA_SIZE];
         };
 
-        struct ICMPUnreachableMessage : ICMPHeader {
+        struct ICMPRevertedMessage : ICMPHeader {
             uint32_t unused;
-            uint8_t data[ICMPLIB_UNREACHABLE_ORIGINAL_DATA_SIZE];
+            uint8_t data[ICMPLIB_ORIGINAL_DATA_SIZE];
         };
 
         static uint16_t SetChecksum(ICMPHeader &packet, unsigned long length) {

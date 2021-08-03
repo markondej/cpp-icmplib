@@ -6,7 +6,7 @@ int main()
     std::string address = "8.8.8.8";
     std::cout << "Pinging " << address << " with " << ICMPLIB_PING_DATA_SIZE << " bytes of data:" << std::endl;
     try {
-        auto result = icmplib::Ping(address, 5, 5);
+        auto result = icmplib::Ping(address);
         if (result.response != icmplib::Echo::Result::ResponseType::Timeout) {
             std::cout << "Reply from " << result.host << ": ";
             switch (result.response) {
@@ -15,6 +15,9 @@ int main()
                 break;
             case icmplib::Echo::Result::ResponseType::Unreachable:
                 std::cout << "Destination unreachable.";
+                break;
+            case icmplib::Echo::Result::ResponseType::TimeExceeded:
+                std::cout << "Time exceeded.";
                 break;
             }
         } else {
