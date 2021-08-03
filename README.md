@@ -59,7 +59,7 @@ In order to make internet connection test simply use:
 
 bool isConnected()
 {
-    return icmplib::Ping("8.8.8.8", 5).response == icmplib::PingResponseType::Success; // Test Google DNS server address
+    return icmplib::Ping("8.8.8.8", 5).response == icmplib::PingResponseType::Success; // Test Google DNS address
 }
 ```
 
