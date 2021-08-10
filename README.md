@@ -1,16 +1,16 @@
 # A C++ header-only ICMP Ping library
 
 This is cross-platform library, which allows performing system-like IPv4 ping requests from C++ applications without need of use system "ping" command.
-As library is socket based, on most operating systems, it will require administrator privilages (root) to run.
+As library is socket-based, on most operating systems, it will require administrator privilages (root) to run.
 
 ## How to use
 
 icmplib delivers function Ping declared as:
 ```
-PingResult Ping(const std::string &ipv4, unsigned timeout = 60, uint8_t ttl = 255);
+PingResult Ping(const std::string &target, unsigned timeout = 60, uint8_t ttl = 255);
 ```
 where:
-* ipv4 - IPv4 network address
+* target - IPv4 network address or hostname
 * timeout - Timeout in seconds
 * ttl - Time-to-live to be set for packet
 
@@ -40,13 +40,13 @@ where:
 
 ```
 ResponseType            | Meaning
-----------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------
 Success                 | ICMP Echo Response successfully received
-Unreachable             | ICMP Destination Ureachable message received (ie. host does not exist)
-TimeExceeded            | ICMP Time Exceeded message received (ie. TTL meet zero value on some host)
-Timeout                 | No message recived in passed time (see "timeout" parameter)
+Unreachable             | ICMP Destination Ureachable message received (eg. target host does not exist)
+TimeExceeded            | ICMP Time Exceeded message received (eg. TTL meet zero value on some host)
+Timeout                 | No message recived in given time (see "timeout" parameter)
 Unsupported             | Received unsupported ICMP packet
-Failure                 | Failed to send ICMP Echo Request to given host
+Failure                 | Failed to send ICMP Echo Request to given target host
 ```
 
 ## Examples
@@ -92,10 +92,8 @@ std::vector<std::string> traceroute(const std::string &ipv4)
 ## To be done
 
 Work need to be done:
-* Code needs refactor to be more SOLID-like
-* Auto hostname translation to IP address
 * IPv6 support
 
 ## Known issues
 
-On Windows 10 ICMP Destination Unreachable messages seems to be blocked and, while being received, are not passed to application via socket
+On Windows 10 ICMP messages other than Echo Response seems to be blocked and, while being received, are not passed to application via socket, timeout is detected instead

@@ -4,7 +4,7 @@
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    std::string address = "8.8.8.8";
+    std::string address = "wp.pl";
     if (argc > 1) { address = argv[1]; }
     std::cout << "Pinging " << address << " with " << ICMPLIB_PING_DATA_SIZE << " bytes of data:" << std::endl;
     auto result = icmplib::Ping(address);
