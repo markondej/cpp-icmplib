@@ -39,23 +39,15 @@
 #define ICMPLIB_NOP_DELAY 10
 
 #ifdef _WIN32
-#define ICMPLIB_IN_ADDR IN_ADDR
 #define ICMPLIB_SOCKET SOCKET
-#define ICMPLIB_SOCKADDR SOCKADDR
-#define ICMPLIB_SOCKADDR_IN SOCKADDR_IN
 #define ICMPLIB_SOCKETADDR_LENGTH int
 #define ICMPLIB_ADDRSTR_LENGTH DWORD
-#define ICMPLIB_ADDRINFO ADDRINFOA
 #define ICMPLIB_SOCKET_ERROR SOCKET_ERROR
 #define ICMPLIB_CLOSESOCKET closesocket
 #else
-#define ICMPLIB_IN_ADDR in_addr
 #define ICMPLIB_SOCKET int
-#define ICMPLIB_SOCKADDR sockaddr
-#define ICMPLIB_SOCKADDR_IN sockaddr_in
 #define ICMPLIB_SOCKETADDR_LENGTH socklen_t
 #define ICMPLIB_ADDRSTR_LENGTH unsigned long
-#define ICMPLIB_ADDRINFO addrinfo
 #define ICMPLIB_SOCKET_ERROR -1
 #define ICMPLIB_CLOSESOCKET close
 #endif
@@ -93,10 +85,10 @@ namespace icmplib {
     };
 
 #endif
-    class AddressIPv4 : public ICMPLIB_SOCKADDR_IN {
+    class AddressIPv4 : public sockaddr_in {
     public:
         AddressIPv4() {
-            std::memset(this, 0, sizeof(ICMPLIB_SOCKADDR_IN));
+            std::memset(this, 0, sizeof(sockaddr_in));
             this->sin_family = AF_INET;
             this->sin_port = htons(53);
         }
@@ -115,19 +107,19 @@ namespace icmplib {
 #endif
             AddressIPv4 addr;
 
-            ICMPLIB_ADDRINFO hints;
-            std::memset(&hints, 0, sizeof(ICMPLIB_ADDRINFO));
+            addrinfo hints;
+            std::memset(&hints, 0, sizeof(addrinfo));
             hints.ai_family = AF_UNSPEC;
             hints.ai_socktype = SOCK_STREAM;
             hints.ai_protocol = IPPROTO_TCP;
 
-            ICMPLIB_ADDRINFO *result = NULL;
+            addrinfo *result = NULL;
             if (getaddrinfo(address.c_str(), NULL, &hints, &result) == 0) {
-                for (ICMPLIB_ADDRINFO *ptr = result; ptr != NULL; ptr = ptr->ai_next) {
+                for (addrinfo *ptr = result; ptr != NULL; ptr = ptr->ai_next) {
                     switch (ptr->ai_family) {
                     case AF_INET:
                         try {
-                            std::memcpy(&addr, ptr->ai_addr, sizeof(ICMPLIB_SOCKADDR_IN));
+                            std::memcpy(&addr, ptr->ai_addr, sizeof(sockaddr_in));
                             freeaddrinfo(result);
                             return addr.ToString();
                         }
@@ -277,8 +269,8 @@ namespace icmplib {
                 this->type = ICMPLIB_ICMP_ECHO_REQUEST;
                 SetChecksum<ICMPEchoMessage>(this);
             };
-            void Send(ICMPLIB_SOCKET sock, ICMPLIB_SOCKADDR_IN &address) {
-                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, reinterpret_cast<ICMPLIB_SOCKADDR *>(&address), static_cast<ICMPLIB_SOCKETADDR_LENGTH>(sizeof(ICMPLIB_SOCKADDR_IN)));
+            void Send(ICMPLIB_SOCKET sock, sockaddr_in &address) {
+                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, reinterpret_cast<sockaddr *>(&address), static_cast<ICMPLIB_SOCKETADDR_LENGTH>(sizeof(sockaddr)));
                 if (bytes == ICMPLIB_SOCKET_ERROR) {
                     throw std::runtime_error("Failed to send request!");
                 }
@@ -295,10 +287,10 @@ namespace icmplib {
                     delete header;
                 }
             };
-            bool Recv(ICMPLIB_SOCKET sock, ICMPLIB_SOCKADDR_IN &address) {
-                ICMPLIB_SOCKETADDR_LENGTH length = sizeof(ICMPLIB_SOCKADDR_IN);
-                std::memset(&address, 0, sizeof(ICMPLIB_SOCKADDR_IN));
-                int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, reinterpret_cast<ICMPLIB_SOCKADDR *>(&address), &length);
+            bool Recv(ICMPLIB_SOCKET sock, sockaddr_in &address) {
+                ICMPLIB_SOCKETADDR_LENGTH length = sizeof(sockaddr_in);
+                std::memset(&address, 0, sizeof(sockaddr_in));
+                int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, reinterpret_cast<sockaddr *>(&address), &length);
                 if (bytes <= 0) {
                     return false;
                 }
