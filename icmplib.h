@@ -44,6 +44,8 @@
 #define ICMPLIB_SOCKADDR SOCKADDR
 #define ICMPLIB_SOCKADDR_IN SOCKADDR_IN
 #define ICMPLIB_SOCKETADDR_LENGTH int
+#define ICMPLIB_ADDRSTR_LENGTH DWORD
+#define ICMPLIB_ADDRINFO ADDRINFOA
 #define ICMPLIB_SOCKET_ERROR SOCKET_ERROR
 #define ICMPLIB_CLOSESOCKET closesocket
 #else
@@ -52,6 +54,8 @@
 #define ICMPLIB_SOCKADDR sockaddr
 #define ICMPLIB_SOCKADDR_IN sockaddr_in
 #define ICMPLIB_SOCKETADDR_LENGTH socklen_t
+#define ICMPLIB_ADDRSTR_LENGTH unsigned long
+#define ICMPLIB_ADDRINFO addrinfo
 #define ICMPLIB_SOCKET_ERROR -1
 #define ICMPLIB_CLOSESOCKET close
 #endif
@@ -89,17 +93,66 @@ namespace icmplib {
     };
 
 #endif
-    inline bool IsIPv4(const std::string &address) {
-        return std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"));
-    }
-
-    std::string ResolveAddress(const std::string &address) {
-        hostent *he = gethostbyname(address.c_str());
-        if (he != nullptr) {
-            return std::string(inet_ntoa(*reinterpret_cast<ICMPLIB_IN_ADDR *>(he->h_addr_list[0])));
+    class AddressIPv4 : public ICMPLIB_SOCKADDR_IN {
+    public:
+        AddressIPv4() {
+            std::memset(this, 0, sizeof(ICMPLIB_SOCKADDR_IN));
+            this->sin_family = AF_INET;
+            this->sin_port = htons(53);
         }
-        throw std::runtime_error("Cannot resolve address: " + address);
-    }
+        AddressIPv4(const std::string &address) : AddressIPv4() {
+            std::string ipv4 = address;
+            if (!IsCorrect(address)) {
+                ipv4 = Resolve(address);
+            }
+            if (inet_pton(AF_INET, ipv4.c_str(), &this->sin_addr) <= 0) {
+                throw std::runtime_error("Incorrect IPv4 address provided!");
+            }
+        }
+        std::string Resolve(const std::string &address) const {
+#ifdef _WIN32
+            WinSock::Initialize();
+#endif
+            AddressIPv4 addr;
+
+            ICMPLIB_ADDRINFO hints;
+            std::memset(&hints, 0, sizeof(ICMPLIB_ADDRINFO));
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            hints.ai_protocol = IPPROTO_TCP;
+
+            ICMPLIB_ADDRINFO *result = NULL;
+            if (getaddrinfo(address.c_str(), NULL, &hints, &result) == 0) {
+                for (ICMPLIB_ADDRINFO *ptr = result; ptr != NULL; ptr = ptr->ai_next) {
+                    switch (ptr->ai_family) {
+                    case AF_INET:
+                        try {
+                            std::memcpy(&addr, ptr->ai_addr, sizeof(ICMPLIB_SOCKADDR_IN));
+                            freeaddrinfo(result);
+                            return addr.ToString();
+                        }
+                        catch (...) {
+                            break;
+                        }
+                    default:
+                        break;
+                    }
+                }
+                freeaddrinfo(result);
+            }
+            throw std::runtime_error("Cannot resolve address: " + address);
+        }
+        std::string ToString() const {
+            char buffer[ICMPLIB_INET4_ADDRESSSTRLEN];
+            if (inet_ntop(AF_INET, &this->sin_addr, buffer, ICMPLIB_INET4_ADDRESSSTRLEN) != NULL) {
+                return std::string(buffer);
+            }
+            throw std::runtime_error("Cannot convert IPv4 address structure");
+        }
+        static inline bool IsCorrect(const std::string &address) {
+            return std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"));
+        }
+    };
 
     class ICMPEcho {
     public:
@@ -127,11 +180,11 @@ namespace icmplib {
 #ifdef _WIN32
                 WinSock::Initialize();
 #endif
-                Address address(target);
+                AddressIPv4 address(target);
                 Socket sock(ttl);
 
                 Request request;
-                request.Transmit(sock.GetSocket(), address);
+                request.Send(sock.GetSocket(), address);
                 auto start = std::chrono::high_resolution_clock::now();
 
                 while (true) {
@@ -216,32 +269,6 @@ namespace icmplib {
             ICMPLIB_SOCKET sock;
         };
 
-        class Address : public ICMPLIB_SOCKADDR_IN {
-        public:
-            Address() = delete;
-            Address(const std::string &address) {
-                std::string ipv4 = address;
-                if (!IsIPv4(address)) {
-                    ipv4 = ResolveAddress(address);
-                }
-                std::memset(this, 0, sizeof(ICMPLIB_SOCKADDR_IN));
-                this->sin_family = AF_INET;
-                this->sin_port = htons(53);
-
-                if (inet_pton(AF_INET, ipv4.c_str(), &this->sin_addr) <= 0) {
-                    throw std::runtime_error("Incorrect IPv4 address provided!");
-                }
-            }
-            std::string ToString() const {
-                std::string ipv4;
-                char buffer[ICMPLIB_INET4_ADDRESSSTRLEN];
-                if (inet_ntop(AF_INET, &this->sin_addr, buffer, ICMPLIB_INET4_ADDRESSSTRLEN) != NULL) {
-                    ipv4 = buffer;
-                }
-                return ipv4;
-            }
-        };
-
         class Request : public ICMPEchoMessage {
         public:
             Request() {
@@ -250,7 +277,7 @@ namespace icmplib {
                 this->type = ICMPLIB_ICMP_ECHO_REQUEST;
                 SetChecksum<ICMPEchoMessage>(this);
             };
-            void Transmit(ICMPLIB_SOCKET sock, ICMPLIB_SOCKADDR_IN &address) {
+            void Send(ICMPLIB_SOCKET sock, ICMPLIB_SOCKADDR_IN &address) {
                 int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, reinterpret_cast<ICMPLIB_SOCKADDR *>(&address), static_cast<ICMPLIB_SOCKETADDR_LENGTH>(sizeof(ICMPLIB_SOCKADDR_IN)));
                 if (bytes == ICMPLIB_SOCKET_ERROR) {
                     throw std::runtime_error("Failed to send request!");

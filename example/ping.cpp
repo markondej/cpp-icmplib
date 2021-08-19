@@ -6,8 +6,8 @@ int main(int argc, char *argv[])
     std::string address = "8.8.8.8", resolved;
     if (argc > 1) { address = argv[1]; }
     try {
-        if (!icmplib::IsIPv4(address)) {
-            resolved = address; address = icmplib::ResolveAddress(address);
+        if (!icmplib::AddressIPv4::IsCorrect(address)) {
+            resolved = address; address = icmplib::AddressIPv4(address).ToString();
         }
     } catch (...) {
         std::cout << "Ping request could not find host " << address << ". Please check the name and try again." << std::endl;
