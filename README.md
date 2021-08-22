@@ -96,4 +96,4 @@ Work need to be done:
 
 ## Known issues
 
-On Windows 10 ICMP messages other than Echo Response seems to be blocked and, while being received, are not passed to application via socket, timeout is detected instead
+On Windows 10 ICMP messages other than Echo Response seem to be blocked and, while being received, are not passed to application via socket, timeout is detected instead
