@@ -89,14 +89,14 @@ namespace icmplib {
     public:
         AddressIPv4() {
             std::memset(this, 0, sizeof(sockaddr_in));
-            this->sin_family = AF_INET;
+            sin_family = AF_INET;
         }
         AddressIPv4(const std::string &address) : AddressIPv4() {
             std::string ipv4 = address;
             if (!IsCorrect(address)) {
                 ipv4 = Resolve(address);
             }
-            if (inet_pton(AF_INET, ipv4.c_str(), &this->sin_addr) <= 0) {
+            if (inet_pton(AF_INET, ipv4.c_str(), &sin_addr) <= 0) {
                 throw std::runtime_error("Incorrect IPv4 address provided!");
             }
         }
@@ -135,7 +135,7 @@ namespace icmplib {
         }
         std::string ToString() const {
             char buffer[ICMPLIB_INET4_ADDRESSSTRLEN];
-            if (inet_ntop(AF_INET, &this->sin_addr, buffer, ICMPLIB_INET4_ADDRESSSTRLEN) != NULL) {
+            if (inet_ntop(AF_INET, &sin_addr, buffer, ICMPLIB_INET4_ADDRESSSTRLEN) != NULL) {
                 return std::string(buffer);
             }
             throw std::runtime_error("Cannot convert IPv4 address structure");
@@ -264,8 +264,8 @@ namespace icmplib {
         public:
             Request() {
                 std::memset(this, 0, sizeof(ICMPEchoMessage));
-                this->id = rand() % USHRT_MAX;
-                this->type = ICMPLIB_ICMP_ECHO_REQUEST;
+                id = rand() % USHRT_MAX;
+                type = ICMPLIB_ICMP_ECHO_REQUEST;
                 SetChecksum<ICMPEchoMessage>(this);
             };
             void Send(ICMPLIB_SOCKET sock, sockaddr_in &address) {
