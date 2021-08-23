@@ -33,7 +33,6 @@
 #define ICMPLIB_INET4_ADDRESSSTRLEN 17
 #define ICMPLIB_INET4_HEADER_SIZE 20
 #define ICMPLIB_INET4_TTL_OFFSET 8
-#define ICMPLIB_INET4_TTL_OFFSET 8
 #define ICMPLIB_ORIGINAL_DATA_SIZE ICMPLIB_INET4_HEADER_SIZE + 8
 
 #define ICMPLIB_NOP_DELAY 10
@@ -118,7 +117,7 @@ namespace icmplib {
                     switch (ptr->ai_family) {
                     case AF_INET:
                         try {
-                            std::memcpy(&addr, ptr->ai_addr, sizeof(sockaddr_in));
+                            std::memcpy(reinterpret_cast<sockaddr_in *>(&addr), ptr->ai_addr, sizeof(sockaddr_in));
                             freeaddrinfo(result);
                             return addr.ToString();
                         }
@@ -249,7 +248,7 @@ namespace icmplib {
                     ICMPLIB_CLOSESOCKET(sock);
                     throw std::runtime_error("Cannot set socket options!");
                 }
-                }
+            }
             virtual ~Socket() {
                 ICMPLIB_CLOSESOCKET(sock);
             }
