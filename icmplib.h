@@ -90,7 +90,6 @@ namespace icmplib {
         AddressIPv4() {
             std::memset(this, 0, sizeof(sockaddr_in));
             this->sin_family = AF_INET;
-            this->sin_port = htons(53);
         }
         AddressIPv4(const std::string &address) : AddressIPv4() {
             std::string ipv4 = address;
