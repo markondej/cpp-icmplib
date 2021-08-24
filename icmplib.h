@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef ICMPLIB_PING_DATA_SIZE
 #define ICMPLIB_PING_DATA_SIZE 64
 #endif
@@ -39,14 +41,10 @@
 
 #ifdef _WIN32
 #define ICMPLIB_SOCKET SOCKET
-#define ICMPLIB_SOCKETADDR_LENGTH int
-#define ICMPLIB_ADDRSTR_LENGTH DWORD
 #define ICMPLIB_SOCKET_ERROR SOCKET_ERROR
 #define ICMPLIB_CLOSESOCKET closesocket
 #else
 #define ICMPLIB_SOCKET int
-#define ICMPLIB_SOCKETADDR_LENGTH socklen_t
-#define ICMPLIB_ADDRSTR_LENGTH unsigned long
 #define ICMPLIB_SOCKET_ERROR -1
 #define ICMPLIB_CLOSESOCKET close
 #endif
@@ -268,7 +266,7 @@ namespace icmplib {
                 SetChecksum<ICMPEchoMessage>(this);
             };
             void Send(ICMPLIB_SOCKET sock, sockaddr_in &address) {
-                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, reinterpret_cast<sockaddr *>(&address), static_cast<ICMPLIB_SOCKETADDR_LENGTH>(sizeof(sockaddr)));
+                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, reinterpret_cast<sockaddr *>(&address), static_cast<socklen_t>(sizeof(sockaddr)));
                 if (bytes == ICMPLIB_SOCKET_ERROR) {
                     throw std::runtime_error("Failed to send request!");
                 }
@@ -286,7 +284,7 @@ namespace icmplib {
                 }
             };
             bool Recv(ICMPLIB_SOCKET sock, sockaddr_in &address) {
-                ICMPLIB_SOCKETADDR_LENGTH length = sizeof(sockaddr_in);
+                socklen_t length = sizeof(sockaddr_in);
                 std::memset(&address, 0, sizeof(sockaddr_in));
                 int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, reinterpret_cast<sockaddr *>(&address), &length);
                 if (bytes <= 0) {
