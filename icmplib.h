@@ -31,6 +31,8 @@
 #define ICMPLIB_ICMP_DESTINATION_UNREACHABLE 3
 #define ICMPLIB_ICMP_ECHO_REQUEST 8
 #define ICMPLIB_ICMP_TIME_EXCEEDED 11
+#define ICMPLIB_ICMPV6_DESTINATION_UNREACHABLE 1
+#define ICMPLIB_ICMPV6_TIME_EXCEEDED 3
 #define ICMPLIB_ICMPV6_ECHO_REQUEST 128
 #define ICMPLIB_ICMPV6_ECHO_RESPONSE 129
 
@@ -354,7 +356,7 @@ namespace icmplib {
                         continue;
                     }
 
-                    result.response = GetResponseType(request, response);
+                    result.response = (source.GetType() != AddressIP::Type::IPv6) ? GetResponseType(request, response) : GetResponseTypeV6(request, response);
                     if (result.response != Result::ResponseType::Timeout) {
                         result.interval = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
                         result.address = source;
@@ -535,15 +537,8 @@ namespace icmplib {
             ICMPRevertedMessage reverted;
             switch (response.GetICMPHeader().type) {
             case ICMPLIB_ICMP_ECHO_RESPONSE:
-            case ICMPLIB_ICMPV6_ECHO_RESPONSE:
                 result = Result::ResponseType::Success;
                 echo = response.Generate<ICMPEchoMessage>();
-                if (response.GetProtocol() == AddressIP::Type::IPv6) {
-                    if (request.id != echo.id) {
-                        result = Result::ResponseType::Unsupported;
-                    }
-                    break;
-                }
                 echo.checksum = 0;
                 if ((response.GetICMPHeader().checksum != SetChecksum<ICMPEchoMessage>(echo)) || (request.id != echo.id)) {
                     result = Result::ResponseType::Unsupported;
@@ -555,9 +550,6 @@ namespace icmplib {
                 if (result == Result::ResponseType::Timeout) {
                     result = Result::ResponseType::TimeExceeded;
                 }
-                if (response.GetProtocol() == AddressIP::Type::IPv6) {
-                    break;
-                }
                 reverted = response.Generate<ICMPRevertedMessage>();
                 reverted.checksum = 0;
                 if (response.GetICMPHeader().checksum != SetChecksum<ICMPRevertedMessage>(reverted)) {
@@ -565,6 +557,32 @@ namespace icmplib {
                 }
                 break;
             case ICMPLIB_ICMP_ECHO_REQUEST:
+                break;
+            default:
+                result = Result::ResponseType::Unsupported;
+            }
+
+            return result;
+        };
+
+        static Result::ResponseType GetResponseTypeV6(const Request &request, Response &response) {
+            Result::ResponseType result = Result::ResponseType::Timeout;
+            ICMPEchoMessage echo;
+            switch (response.GetICMPHeader().type) {
+            case ICMPLIB_ICMPV6_ECHO_RESPONSE:
+                result = Result::ResponseType::Success;
+                echo = response.Generate<ICMPEchoMessage>();
+                if (request.id != echo.id) {
+                    result = Result::ResponseType::Unsupported;
+                }
+                break;
+            case ICMPLIB_ICMPV6_DESTINATION_UNREACHABLE:
+                result = Result::ResponseType::Unreachable;
+            case ICMPLIB_ICMPV6_TIME_EXCEEDED:
+                if (result == Result::ResponseType::Timeout) {
+                    result = Result::ResponseType::TimeExceeded;
+                }
+                break;
             case ICMPLIB_ICMPV6_ECHO_REQUEST:
                 break;
             default:

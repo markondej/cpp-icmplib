@@ -32,6 +32,7 @@
 			<Add option="-static" />
 			<Add library="ws2_32" />
 		</Linker>
+		<Unit filename="../icmplib.h" />
 		<Unit filename="ping.cpp" />
 		<Extensions>
 			<lib_finder disable_auto="1" />

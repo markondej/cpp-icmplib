@@ -3,7 +3,7 @@
 
 int main(int argc, char *argv[])
 {
-    std::string address = "wp.pl", resolved;
+    std::string address = "8:8:8:8", resolved;
     if (argc > 1) { address = argv[1]; }
     try {
         if (!icmplib::AddressIP::IsCorrect(address, icmplib::AddressIP::Type::Unknown)) {

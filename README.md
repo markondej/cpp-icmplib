@@ -12,7 +12,7 @@ PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 60, uint16_
 where:
 * target - Network address (may be created from std::string)
 * timeout - Timeout in seconds
-* sequence - Sequence nubmer to be used
+* sequence - Sequence number to be sent
 * ttl - Time-to-live to be set for packet
 
 PingResult structure is declared as:
@@ -77,10 +77,10 @@ std::vector<std::string> traceroute(const std::string &address)
         auto ping = icmplib::Ping(address, 5, 1, ttl);
         switch (ping.response) {
         case icmplib::PingResult::ResponseType::TimeExceeded:
-            result.push_back(ping.ipv4);
+            result.push_back(ping.address.ToString());
             break;
         case icmplib::PingResult::ResponseType::Success:
-            result.push_back(ping.ipv4);
+            result.push_back(ping.address.ToString());
             return result;
         default:
             return result;
