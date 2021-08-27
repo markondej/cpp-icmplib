@@ -337,7 +337,7 @@ namespace icmplib {
 #ifdef _WIN32
                 WinSock::Initialize();
 #endif
-                Socket sock(target.GetType(), ttl);
+                ICMPSocket sock(target.GetType(), ttl);
 
                 Request request(target.GetType(), sequence);
                 request.Send(sock.GetSocket(), target);
@@ -388,9 +388,9 @@ namespace icmplib {
             uint8_t data[ICMPLIB_INET4_ORIGINAL_DATA_SIZE];
         };
 
-        class Socket {
+        class ICMPSocket {
         public:
-            Socket(AddressIP::Type type, uint8_t ttl) {
+            ICMPSocket(AddressIP::Type type, uint8_t ttl) {
                 int protocol = IPPROTO_ICMP;
                 if (type == AddressIP::Type::IPv6) {
                     protocol = IPPROTO_ICMPV6;
@@ -405,7 +405,15 @@ namespace icmplib {
                     throw std::runtime_error("Cannot initialize socket!");
                 }
 
-                if (type != AddressIP::Type::IPv6) {
+                switch (type) {
+                case AddressIP::Type::IPv6:
+                    if (setsockopt(sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
+                        ICMPLIB_CLOSESOCKET(sock);
+                        throw std::runtime_error("Cannot set socket options!");
+                    }
+                    break;
+                case AddressIP::Type::IPv4:
+                default:
                     if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
                         ICMPLIB_CLOSESOCKET(sock);
                         throw std::runtime_error("Cannot set socket options!");
@@ -423,7 +431,7 @@ namespace icmplib {
                     throw std::runtime_error("Cannot set socket options!");
                 }
             }
-            virtual ~Socket() {
+            virtual ~ICMPSocket() {
                 ICMPLIB_CLOSESOCKET(sock);
             }
             inline const ICMPLIB_SOCKET &GetSocket() {
