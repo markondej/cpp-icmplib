@@ -31,11 +31,13 @@
 #define ICMPLIB_ICMP_DESTINATION_UNREACHABLE 3
 #define ICMPLIB_ICMP_ECHO_REQUEST 8
 #define ICMPLIB_ICMP_TIME_EXCEEDED 11
+#define ICMPLIB_ICMPV6_ECHO_REQUEST 128
+#define ICMPLIB_ICMPV6_ECHO_RESPONSE 129
 
-#define ICMPLIB_INET4_ADDRESSSTRLEN 17
 #define ICMPLIB_INET4_HEADER_SIZE 20
 #define ICMPLIB_INET4_TTL_OFFSET 8
-#define ICMPLIB_ORIGINAL_DATA_SIZE ICMPLIB_INET4_HEADER_SIZE + 8
+#define ICMPLIB_INET4_ORIGINAL_DATA_SIZE ICMPLIB_INET4_HEADER_SIZE + 8
+#define ICMPLIB_INET6_ORIGINAL_DATA_SIZE 8
 
 #define ICMPLIB_NOP_DELAY 10
 
@@ -82,27 +84,114 @@ namespace icmplib {
     };
 
 #endif
-    class AddressIPv4 : public sockaddr_in {
+    class AddressIP {
     public:
-        AddressIPv4() {
-            std::memset(this, 0, sizeof(sockaddr_in));
-            sin_family = AF_INET;
+        enum class Type {
+            IPv4,
+            IPv6,
+            Unknown
+        };
+        AddressIP() {
+            address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+            std::memset(address, 0, sizeof(sockaddr_in));
+            (reinterpret_cast<sockaddr_in *>(address))->sin_family = AF_INET;
         }
-        AddressIPv4(const std::string &address) : AddressIPv4() {
-            std::string ipv4 = address;
-            if (!IsCorrect(address)) {
-                ipv4 = Resolve(address);
+        AddressIP(const std::string &address, Type type = Type::Unknown) : AddressIP() {
+            auto init = [&](Type type) {
+                switch (type) {
+                case Type::IPv6:
+                    this->address = reinterpret_cast<sockaddr *>(new sockaddr_in6);
+                    std::memset(this->address, 0, sizeof(sockaddr_in6));
+                    (reinterpret_cast<sockaddr_in6 *>(this->address))->sin6_family = AF_INET6;
+                    if (inet_pton(AF_INET6, address.c_str(), &(reinterpret_cast<sockaddr_in6 *>(this->address))->sin6_addr) <= 0) {
+                        delete this->address;
+                        throw std::runtime_error("Incorrect IPv6 address provided!");
+                    }
+                    break;
+                case Type::IPv4:
+                default:
+                    this->address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+                    std::memset(this->address, 0, sizeof(sockaddr_in));
+                    (reinterpret_cast<sockaddr_in *>(this->address))->sin_family = AF_INET;
+                    if (inet_pton(AF_INET, address.c_str(), &(reinterpret_cast<sockaddr_in *>(this->address))->sin_addr) <= 0) {
+                        delete this->address;
+                        throw std::runtime_error("Incorrect IPv4 address provided!");
+                    }
+                }
+            };
+            bool resolve = true;
+            if ((type != Type::Unknown) && IsCorrect(address, type)) {
+                init(type);
+                resolve = false;
+            } else if (type == Type::Unknown) {
+                if (IsCorrect(address, Type::IPv4)) {
+                    init(Type::IPv4);
+                    resolve = false;
+                } else if (IsCorrect(address, Type::IPv6)) {
+                    init(Type::IPv6);
+                    resolve = false;
+                }
             }
-            if (inet_pton(AF_INET, ipv4.c_str(), &sin_addr) <= 0) {
-                throw std::runtime_error("Incorrect IPv4 address provided!");
+            if (resolve) {
+                Resolve(address, type);
             }
         }
-        std::string Resolve(const std::string &address) const {
+        AddressIP(const std::string &address, uint16_t port, Type type = Type::Unknown) : AddressIP(address, type) {
+            SetPort(port);
+        }
+        AddressIP(unsigned long address) : AddressIP() {
+            (reinterpret_cast<sockaddr_in *>(this->address))->sin_addr.s_addr = address;
+        }
+        AddressIP(unsigned long address, uint16_t port) : AddressIP(address) {
+            SetPort(port);
+        }
+        AddressIP(const AddressIP &source) {
+            switch (source.GetType()) {
+            case Type::IPv6:
+                address = reinterpret_cast<sockaddr *>(new sockaddr_in6);
+                std::memcpy(address, source.address, sizeof(sockaddr_in6));
+                break;
+            case Type::IPv4:
+            default:
+                address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+                std::memcpy(address, source.address, sizeof(sockaddr_in));
+            }
+        }
+        AddressIP(AddressIP &&source) {
+            address = source.address;
+            source.address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+            std::memset(source.address, 0, sizeof(sockaddr_in));
+            (reinterpret_cast<sockaddr_in *>(source.address))->sin_family = AF_INET;
+        }
+        virtual ~AddressIP() {
+            delete address;
+        }
+        AddressIP &operator=(const AddressIP &source) {
+            delete address;
+            switch (source.GetType()) {
+            case Type::IPv6:
+                address = reinterpret_cast<sockaddr *>(new sockaddr_in6);
+                std::memcpy(address, source.address, sizeof(sockaddr_in6));
+                break;
+            case Type::IPv4:
+            default:
+                address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+                std::memcpy(address, source.address, sizeof(sockaddr_in));
+            }
+            return *this;
+        }
+        AddressIP &operator=(AddressIP &&source) {
+            delete address;
+            address = source.address;
+            source.address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+            std::memset(source.address, 0, sizeof(sockaddr_in));
+            (reinterpret_cast<sockaddr_in *>(source.address))->sin_family = AF_INET;
+            return *this;
+        }
+        AddressIP &Resolve(const std::string &address, Type type = Type::IPv4) {
 #ifdef _WIN32
             WinSock::Initialize();
 #endif
-            AddressIPv4 addr;
-
             addrinfo hints;
             std::memset(&hints, 0, sizeof(addrinfo));
             hints.ai_family = AF_UNSPEC;
@@ -114,14 +203,25 @@ namespace icmplib {
                 for (addrinfo *ptr = result; ptr != NULL; ptr = ptr->ai_next) {
                     switch (ptr->ai_family) {
                     case AF_INET:
-                        try {
-                            std::memcpy(reinterpret_cast<sockaddr_in *>(&addr), ptr->ai_addr, sizeof(sockaddr_in));
-                            freeaddrinfo(result);
-                            return addr.ToString();
-                        }
-                        catch (...) {
+                        if ((type != Type::IPv4) && (type != Type::Unknown)) {
                             break;
                         }
+                        delete this->address;
+                        this->address = reinterpret_cast<sockaddr *>(new sockaddr_in);
+                        std::memcpy(this->address, ptr->ai_addr, sizeof(sockaddr_in));
+                        freeaddrinfo(result);
+                        type = Type::IPv4;
+                        return *this;
+                    case AF_INET6:
+                        if ((type != Type::IPv6) && (type != Type::Unknown)) {
+                            break;
+                        }
+                        delete this->address;
+                        this->address = reinterpret_cast<sockaddr *>(new sockaddr_in6);
+                        std::memcpy(this->address, ptr->ai_addr, sizeof(sockaddr_in6));
+                        freeaddrinfo(result);
+                        type = Type::IPv6;
+                        return *this;
                     default:
                         break;
                     }
@@ -131,15 +231,82 @@ namespace icmplib {
             throw std::runtime_error("Cannot resolve address: " + address);
         }
         std::string ToString() const {
-            char buffer[ICMPLIB_INET4_ADDRESSSTRLEN];
-            if (inet_ntop(AF_INET, &sin_addr, buffer, ICMPLIB_INET4_ADDRESSSTRLEN) != NULL) {
-                return std::string(buffer);
+            char buffer[INET6_ADDRSTRLEN];
+            switch (GetType()) {
+            case Type::IPv6:
+                if (inet_ntop(AF_INET6, &(reinterpret_cast<sockaddr_in6 *>(address))->sin6_addr, buffer, INET6_ADDRSTRLEN) != NULL) {
+                    return std::string(buffer);
+                }
+                throw std::runtime_error("Cannot convert IPv6 address structure");
+            case Type::IPv4:
+            default:
+                if (inet_ntop(AF_INET, &(reinterpret_cast<sockaddr_in *>(address))->sin_addr, buffer, INET6_ADDRSTRLEN) != NULL) {
+                    return std::string(buffer);
+                }
+                throw std::runtime_error("Cannot convert IPv4 address structure");
             }
-            throw std::runtime_error("Cannot convert IPv4 address structure");
         }
-        static inline bool IsCorrect(const std::string &address) {
-            return std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"));
+        void SetPort(uint16_t port) {
+            switch (GetType()) {
+            case Type::IPv6:
+                (reinterpret_cast<sockaddr_in6 *>(address))->sin6_port = htons(port);
+                break;
+            case Type::IPv4:
+            default:
+                (reinterpret_cast<sockaddr_in *>(address))->sin_port = htons(port);
+            }
         }
+        uint16_t GetPort() const {
+            switch (GetType()) {
+            case Type::IPv6:
+                return (reinterpret_cast<sockaddr_in6 *>(address))->sin6_port;
+                break;
+            case Type::IPv4:
+            default:
+                return (reinterpret_cast<sockaddr_in *>(address))->sin_port;
+            }
+        }
+        Type GetType() const {
+            switch (address->sa_family) {
+            case AF_INET6:
+                return Type::IPv6;
+            case AF_INET:
+            default:
+                return Type::IPv4;
+            }
+        }
+        sockaddr *GetSockAddr() const {
+            return address;
+        }
+#ifdef _WIN32
+        int GetSockAddrLength() const {
+#else
+        socklen_t GetSockAddrLength() const {
+#endif
+            switch (GetType()) {
+            case Type::IPv6:
+                return sizeof(sockaddr_in6);
+            case Type::IPv4:
+            default:
+                return sizeof(sockaddr_in);
+            }
+        }
+        static inline bool IsCorrect(const std::string &address, Type type = Type::IPv4) {
+            return (type == Type::IPv4) ?
+                std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")) :
+                std::regex_match(address, std::regex("^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"));
+        }
+        static int GetFamily(Type type) {
+            switch (type) {
+            case Type::IPv6:
+                return AF_INET6;
+            case Type::IPv4:
+            default:
+                return AF_INET;
+            }
+        }
+    private:
+        sockaddr *address;
     };
 
     class ICMPEcho {
@@ -154,7 +321,7 @@ namespace icmplib {
                 Failure
             } response;
             double interval;
-            std::string ipv4;
+            AddressIP address;
             uint8_t code;
             uint8_t ttl;
         };
@@ -162,22 +329,22 @@ namespace icmplib {
         ICMPEcho(const ICMPEcho &) = delete;
         ICMPEcho(ICMPEcho &&) = delete;
         ICMPEcho &operator=(const ICMPEcho &) = delete;
-        static Result Execute(const std::string &target, unsigned timeout = 60, uint8_t ttl = 255) {
-            Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), std::string(), 0, 0 };
+        static Result Execute(const AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+            Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), AddressIP(), 0, 0 };
             try {
 #ifdef _WIN32
                 WinSock::Initialize();
 #endif
-                AddressIPv4 address(target);
-                Socket sock(ttl);
+                Socket sock(target.GetType(), ttl);
 
-                Request request;
-                request.Send(sock.GetSocket(), address);
+                Request request(target.GetType(), sequence);
+                request.Send(sock.GetSocket(), target);
                 auto start = std::chrono::high_resolution_clock::now();
+                AddressIP source(target);
 
                 while (true) {
                     Response response;
-                    bool recv = response.Recv(sock.GetSocket(), address);
+                    bool recv = response.Receive(sock.GetSocket(), source);
                     auto end = std::chrono::high_resolution_clock::now();
                     if (!recv) {
                         if (static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(end - start).count()) > timeout) {
@@ -190,14 +357,14 @@ namespace icmplib {
                     result.response = GetResponseType(request, response);
                     if (result.response != Result::ResponseType::Timeout) {
                         result.interval = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
-                        result.ipv4 = address.ToString();
+                        result.address = source;
                         result.code = response.GetICMPHeader().code;
                         result.ttl = response.GetTTL();
                         break;
                     }
                 }
             } catch (...) {
-                return { Result::ResponseType::Failure, 0, std::string(), 0, 0 };
+                return { Result::ResponseType::Failure, 0, AddressIP(), 0, 0 };
             }
             return result;
         }
@@ -216,13 +383,18 @@ namespace icmplib {
 
         struct ICMPRevertedMessage : ICMPHeader {
             uint32_t unused;
-            uint8_t data[ICMPLIB_ORIGINAL_DATA_SIZE];
+            uint8_t data[ICMPLIB_INET4_ORIGINAL_DATA_SIZE];
         };
 
         class Socket {
         public:
-            Socket(uint8_t ttl) {
-                sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+            Socket(AddressIP::Type type, uint8_t ttl) {
+                int protocol = IPPROTO_ICMP;
+                if (type == AddressIP::Type::IPv6) {
+                    protocol = IPPROTO_ICMPV6;
+                }
+
+                sock = socket(AddressIP::GetFamily(type), SOCK_RAW, protocol);
 #ifdef _WIN32
                 if (sock == INVALID_SOCKET) {
 #else
@@ -231,9 +403,11 @@ namespace icmplib {
                     throw std::runtime_error("Cannot initialize socket!");
                 }
 
-                if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
-                    ICMPLIB_CLOSESOCKET(sock);
-                    throw std::runtime_error("Cannot set socket options!");
+                if (type != AddressIP::Type::IPv6) {
+                    if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
+                        ICMPLIB_CLOSESOCKET(sock);
+                        throw std::runtime_error("Cannot set socket options!");
+                    }
                 }
 
 #ifdef _WIN32
@@ -259,50 +433,65 @@ namespace icmplib {
 
         class Request : public ICMPEchoMessage {
         public:
-            Request() {
+            Request() = delete;
+            Request(AddressIP::Type protocol, uint16_t sequence = 1) {
                 std::memset(this, 0, sizeof(ICMPEchoMessage));
                 id = rand() % USHRT_MAX;
-                type = ICMPLIB_ICMP_ECHO_REQUEST;
-                SetChecksum<ICMPEchoMessage>(this);
-            };
-            void Send(ICMPLIB_SOCKET sock, sockaddr_in &address) {
-                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, reinterpret_cast<sockaddr *>(&address), static_cast<socklen_t>(sizeof(sockaddr)));
+                type = (protocol != AddressIP::Type::IPv6) ? ICMPLIB_ICMP_ECHO_REQUEST : ICMPLIB_ICMPV6_ECHO_REQUEST;
+                seq = sequence;
+                if (protocol != AddressIP::Type::IPv6) {
+                    SetChecksum<ICMPEchoMessage>(*this);
+                }
+            }
+            void Send(ICMPLIB_SOCKET sock, const AddressIP &address) {
+                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, address.GetSockAddr(), address.GetSockAddrLength());
                 if (bytes == ICMPLIB_SOCKET_ERROR) {
                     throw std::runtime_error("Failed to send request!");
                 }
-            };
+            }
         };
 
         class Response {
         public:
-            Response() : header(nullptr), length(0) {
+            Response() : protocol(AddressIP::Type::IPv4), header(nullptr), length(0) {
                 std::memset(&buffer, 0, sizeof(uint8_t) * ICMPLIB_RECV_BUFFER_SIZE);
-            };
+            }
             virtual ~Response() {
                 if (header != nullptr) {
                     delete header;
                 }
-            };
-            bool Recv(ICMPLIB_SOCKET sock, sockaddr_in &address) {
-                socklen_t length = sizeof(sockaddr_in);
-                std::memset(&address, 0, sizeof(sockaddr_in));
-                int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, reinterpret_cast<sockaddr *>(&address), &length);
+            }
+            bool Receive(ICMPLIB_SOCKET sock, AddressIP &address) {
+#ifdef _WIN32
+                int length = address.GetSockAddrLength();
+#else
+                socklen_t length = address.GetSockAddrLength();
+#endif
+                int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, address.GetSockAddr(), &length);
                 if (bytes <= 0) {
                     return false;
                 }
-                length = static_cast<unsigned>(bytes);
+                this->length = static_cast<unsigned>(bytes);
+                protocol = address.GetType();
                 return true;
             };
             template <class T>
             const T Generate() const {
-                if (sizeof(T) < length) {
+                if (sizeof(T) > length) {
                     throw std::runtime_error("Incorrect ICMP packet size!");
                 }
                 T packet;
                 std::memset(&packet, 0, sizeof(T));
-                std::memcpy(&packet, &buffer[ICMPLIB_INET4_HEADER_SIZE], static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE);
+                switch (protocol) {
+                case AddressIP::Type::IPv6:
+                    std::memcpy(&packet, buffer, static_cast<long unsigned>(length) > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length));
+                    break;
+                case AddressIP::Type::IPv4:
+                default:
+                    std::memcpy(&packet, &buffer[ICMPLIB_INET4_HEADER_SIZE], static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE);
+                }
                 return packet;
-            };
+            }
             const ICMPHeader &GetICMPHeader() {
                 if (header == nullptr) {
                     header = new ICMPHeader;
@@ -310,13 +499,31 @@ namespace icmplib {
                 }
                 return *header;
             }
+            inline AddressIP::Type GetProtocol() const {
+                return protocol;
+            }
             inline const uint8_t GetTTL() {
-                return buffer[ICMPLIB_INET4_TTL_OFFSET];
-            };
+                switch (protocol) {
+                case AddressIP::Type::IPv6:
+                    return 0;
+                    break;
+                case AddressIP::Type::IPv4:
+                default:
+                    return buffer[ICMPLIB_INET4_TTL_OFFSET];
+                }
+            }
             inline const unsigned GetSize() {
-                return length - ICMPLIB_INET4_HEADER_SIZE;
-            };
+                switch (protocol) {
+                case AddressIP::Type::IPv6:
+                    return length;
+                    break;
+                case AddressIP::Type::IPv4:
+                default:
+                    return length - ICMPLIB_INET4_HEADER_SIZE;
+                }
+            }
         private:
+            AddressIP::Type protocol;
             uint8_t buffer[ICMPLIB_RECV_BUFFER_SIZE];
             ICMPHeader *header;
             unsigned length;
@@ -328,10 +535,17 @@ namespace icmplib {
             ICMPRevertedMessage reverted;
             switch (response.GetICMPHeader().type) {
             case ICMPLIB_ICMP_ECHO_RESPONSE:
+            case ICMPLIB_ICMPV6_ECHO_RESPONSE:
                 result = Result::ResponseType::Success;
                 echo = response.Generate<ICMPEchoMessage>();
+                if (response.GetProtocol() == AddressIP::Type::IPv6) {
+                    if (request.id != echo.id) {
+                        result = Result::ResponseType::Unsupported;
+                    }
+                    break;
+                }
                 echo.checksum = 0;
-                if ((response.GetICMPHeader().checksum != SetChecksum<ICMPEchoMessage>(&echo)) || (request.id != echo.id)) {
+                if ((response.GetICMPHeader().checksum != SetChecksum<ICMPEchoMessage>(echo)) || (request.id != echo.id)) {
                     result = Result::ResponseType::Unsupported;
                 }
                 break;
@@ -341,13 +555,17 @@ namespace icmplib {
                 if (result == Result::ResponseType::Timeout) {
                     result = Result::ResponseType::TimeExceeded;
                 }
+                if (response.GetProtocol() == AddressIP::Type::IPv6) {
+                    break;
+                }
                 reverted = response.Generate<ICMPRevertedMessage>();
                 reverted.checksum = 0;
-                if (response.GetICMPHeader().checksum != SetChecksum<ICMPRevertedMessage>(&reverted)) {
+                if (response.GetICMPHeader().checksum != SetChecksum<ICMPRevertedMessage>(reverted)) {
                     result = Result::ResponseType::Unsupported;
                 }
                 break;
             case ICMPLIB_ICMP_ECHO_REQUEST:
+            case ICMPLIB_ICMPV6_ECHO_REQUEST:
                 break;
             default:
                 result = Result::ResponseType::Unsupported;
@@ -357,8 +575,8 @@ namespace icmplib {
         };
 
         template <class T>
-        static uint16_t SetChecksum(T *packet) {
-            uint16_t *element = reinterpret_cast<uint16_t *>(packet);
+        static uint16_t SetChecksum(T &packet) {
+            uint16_t *element = reinterpret_cast<uint16_t *>(&packet);
             unsigned long size = sizeof(T);
             uint32_t sum = 0;
             for (; size > 1; size -= 2) {
@@ -369,15 +587,15 @@ namespace icmplib {
             }
             sum = (sum >> 16) + (sum & 0xFFFF);
             sum += (sum >> 16);
-            packet->checksum = static_cast<uint16_t>(~sum);
-            return packet->checksum;
+            packet.checksum = static_cast<uint16_t>(~sum);
+            return packet.checksum;
         };
     };
 
     using PingResult = ICMPEcho::Result;
     using PingResponseType = ICMPEcho::Result::ResponseType;
 
-    PingResult Ping(const std::string &target, unsigned timeout = 60, uint8_t ttl = 255) {
-        return ICMPEcho::Execute(target, timeout, ttl);
+    PingResult Ping(const AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+        return ICMPEcho::Execute(target, timeout, sequence, ttl);
     }
 }

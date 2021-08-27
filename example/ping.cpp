@@ -3,11 +3,11 @@
 
 int main(int argc, char *argv[])
 {
-    std::string address = "8.8.8.8", resolved;
+    std::string address = "wp.pl", resolved;
     if (argc > 1) { address = argv[1]; }
     try {
-        if (!icmplib::AddressIPv4::IsCorrect(address)) {
-            resolved = address; address = icmplib::AddressIPv4(address).ToString();
+        if (!icmplib::AddressIP::IsCorrect(address, icmplib::AddressIP::Type::Unknown)) {
+            resolved = address; address = icmplib::AddressIP(address).ToString();
         }
     } catch (...) {
         std::cout << "Ping request could not find host " << address << ". Please check the name and try again." << std::endl;
@@ -27,10 +27,13 @@ int main(int argc, char *argv[])
         std::cout << "Request timed out." << std::endl;
         break;
     default:
-        std::cout << "Reply from " << result.ipv4 << ": ";
+        std::cout << "Reply from " << result.address.ToString() << ": ";
         switch (result.response) {
         case icmplib::PingResponseType::Success:
-            std::cout << "time=" << result.interval << " TTL=" << static_cast<unsigned>(result.ttl);
+            std::cout << "time=" << result.interval;
+            if (result.address.GetType() != icmplib::AddressIP::Type::IPv6) {
+                std::cout << " TTL=" << static_cast<unsigned>(result.ttl);
+            }
             break;
         case icmplib::PingResponseType::Unreachable:
             std::cout << "Destination unreachable.";
@@ -38,6 +41,8 @@ int main(int argc, char *argv[])
         case icmplib::PingResponseType::TimeExceeded:
             std::cout << "Time exceeded.";
             break;
+        default:
+            std::cout << "Response not supported.";
         }
         std::cout << std::endl;
     }

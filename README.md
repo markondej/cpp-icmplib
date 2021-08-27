@@ -1,17 +1,18 @@
-# A C++ header-only ICMP Ping library
+# A C++ header-only ICMP/ICMPv6 Ping library
 
-This is cross-platform library, which allows performing system-like IPv4 ping requests from C++ applications without need of use system "ping" command.
+This is cross-platform library, which allows performing system-like ping requests from C++ applications without need of use system "ping" command.
 As library is socket-based, on most operating systems, it will require administrator privilages (root) to run.
 
 ## How to use
 
 icmplib delivers function Ping declared as:
 ```
-PingResult Ping(const std::string &target, unsigned timeout = 60, uint8_t ttl = 255);
+PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255);
 ```
 where:
-* target - IPv4 network address or hostname
+* target - Network address (may be created from std::string)
 * timeout - Timeout in seconds
+* sequence - Sequence nubmer to be used
 * ttl - Time-to-live to be set for packet
 
 PingResult structure is declared as:
@@ -26,14 +27,14 @@ struct PingResult {
         Failure
     } response;
     double interval;
-    std::string ipv4;
+    icmplib::AddressIP address;
     uint8_t code;
     uint8_t ttl;
 };
 ```
 where:
 * interval - Time in miliseconds between sending request and receiving response
-* ipv4 - IPv4 address of responding host
+* address - Address of responding host
 * code - ICMP Code parameter
 * ttl - Received IPv4 header TTL parameter 
 * response - Type of received response
@@ -69,11 +70,11 @@ Simple traceroute implementation:
 #include <vector>
 ...
 
-std::vector<std::string> traceroute(const std::string &ipv4)
+std::vector<std::string> traceroute(const std::string &address)
 {
     std::vector<std::string> result;
     for (uint8_t ttl = 1; ttl != 0; ttl++) {
-        auto ping = icmplib::Ping(ipv4, 5, ttl);
+        auto ping = icmplib::Ping(address, 5, 1, ttl);
         switch (ping.response) {
         case icmplib::PingResult::ResponseType::TimeExceeded:
             result.push_back(ping.ipv4);
@@ -88,11 +89,6 @@ std::vector<std::string> traceroute(const std::string &ipv4)
     return result;
 }
 ```
-
-## To be done
-
-Work need to be done:
-* IPv6 support
 
 ## Known issues
 
