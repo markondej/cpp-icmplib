@@ -339,13 +339,13 @@ namespace icmplib {
 #endif
                 ICMPSocket sock(target.GetType(), ttl);
 
-                Request request(target.GetType(), sequence);
+                ICMPRequest request(target.GetType(), sequence);
                 request.Send(sock.GetSocket(), target);
                 auto start = std::chrono::high_resolution_clock::now();
                 AddressIP source(target);
 
                 while (true) {
-                    Response response;
+                    ICMPResponse response;
                     bool recv = response.Receive(sock.GetSocket(), source);
                     auto end = std::chrono::high_resolution_clock::now();
                     if (!recv) {
@@ -441,10 +441,10 @@ namespace icmplib {
             ICMPLIB_SOCKET sock;
         };
 
-        class Request : public ICMPEchoMessage {
+        class ICMPRequest : public ICMPEchoMessage {
         public:
-            Request() = delete;
-            Request(AddressIP::Type protocol, uint16_t sequence = 1) {
+            ICMPRequest() = delete;
+            ICMPRequest(AddressIP::Type protocol, uint16_t sequence = 1) {
                 std::memset(this, 0, sizeof(ICMPEchoMessage));
                 id = rand() % USHRT_MAX;
                 type = (protocol != AddressIP::Type::IPv6) ? ICMPLIB_ICMP_ECHO_REQUEST : ICMPLIB_ICMPV6_ECHO_REQUEST;
@@ -461,12 +461,12 @@ namespace icmplib {
             }
         };
 
-        class Response {
+        class ICMPResponse {
         public:
-            Response() : protocol(AddressIP::Type::IPv4), header(nullptr), length(0) {
+            ICMPResponse() : protocol(AddressIP::Type::IPv4), header(nullptr), length(0) {
                 std::memset(&buffer, 0, sizeof(uint8_t) * ICMPLIB_RECV_BUFFER_SIZE);
             }
-            virtual ~Response() {
+            virtual ~ICMPResponse() {
                 if (header != nullptr) {
                     delete header;
                 }
@@ -539,7 +539,7 @@ namespace icmplib {
             unsigned length;
         };
 
-        static Result::ResponseType GetResponseType(const Request &request, Response &response) {
+        static Result::ResponseType GetResponseType(const ICMPRequest &request, ICMPResponse &response) {
             Result::ResponseType result = Result::ResponseType::Timeout;
             ICMPEchoMessage echo;
             ICMPRevertedMessage reverted;
@@ -573,7 +573,7 @@ namespace icmplib {
             return result;
         };
 
-        static Result::ResponseType GetResponseTypeV6(const Request &request, Response &response) {
+        static Result::ResponseType GetResponseTypeV6(const ICMPRequest &request, ICMPResponse &response) {
             Result::ResponseType result = Result::ResponseType::Timeout;
             ICMPEchoMessage echo;
             switch (response.GetICMPHeader().type) {
