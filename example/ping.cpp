@@ -7,7 +7,7 @@ int main(int argc, char *argv[])
     if (argc > 1) { address = argv[1]; }
     try {
         if (!icmplib::AddressIP::IsCorrect(address, icmplib::AddressIP::Type::Unknown)) {
-            resolved = address; address = icmplib::AddressIP(address).ToString();
+            resolved = address; address = icmplib::AddressIP(address);
         }
     } catch (...) {
         std::cout << "Ping request could not find host " << address << ". Please check the name and try again." << std::endl;
@@ -27,7 +27,7 @@ int main(int argc, char *argv[])
         std::cout << "Request timed out." << std::endl;
         break;
     default:
-        std::cout << "Reply from " << result.address.ToString() << ": ";
+        std::cout << "Reply from " << static_cast<std::string>(result.address) << ": ";
         switch (result.response) {
         case icmplib::PingResponseType::Success:
             std::cout << "time=" << result.interval;
