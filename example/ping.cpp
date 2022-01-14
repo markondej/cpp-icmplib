@@ -6,8 +6,8 @@ int main(int argc, char *argv[])
     std::string address = "8.8.8.8", resolved;
     if (argc > 1) { address = argv[1]; }
     try {
-        if (!icmplib::AddressIP::IsCorrect(address, icmplib::AddressIP::Type::Unknown)) {
-            resolved = address; address = icmplib::AddressIP(address);
+        if (!icmplib::IPAddress::IsCorrect(address, icmplib::IPAddress::Type::Unknown)) {
+            resolved = address; address = icmplib::IPAddress(address);
         }
     } catch (...) {
         std::cout << "Ping request could not find host " << address << ". Please check the name and try again." << std::endl;
@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
         switch (result.response) {
         case icmplib::PingResponseType::Success:
             std::cout << "time=" << result.interval;
-            if (result.address.GetType() != icmplib::AddressIP::Type::IPv6) {
+            if (result.address.GetType() != icmplib::IPAddress::Type::IPv6) {
                 std::cout << " TTL=" << static_cast<unsigned>(result.ttl);
             }
             break;

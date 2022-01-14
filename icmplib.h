@@ -45,10 +45,12 @@
 
 #ifdef _WIN32
 #define ICMPLIB_SOCKET SOCKET
+#define ICMPLIB_SOCKLEN int
 #define ICMPLIB_SOCKET_ERROR SOCKET_ERROR
 #define ICMPLIB_CLOSESOCKET closesocket
 #else
 #define ICMPLIB_SOCKET int
+#define ICMPLIB_SOCKLEN socklen_t
 #define ICMPLIB_SOCKET_ERROR -1
 #define ICMPLIB_CLOSESOCKET close
 #endif
@@ -86,19 +88,19 @@ namespace icmplib {
     };
 
 #endif
-    class AddressIP {
+    class IPAddress {
     public:
         enum class Type {
             IPv4,
             IPv6,
             Unknown
         };
-        AddressIP() {
+        IPAddress() {
             address = reinterpret_cast<sockaddr *>(new sockaddr_in);
             std::memset(address, 0, sizeof(sockaddr_in));
             (reinterpret_cast<sockaddr_in *>(address))->sin_family = AF_INET;
         }
-        AddressIP(const std::string &address, Type type = Type::Unknown) : AddressIP() {
+        IPAddress(const std::string &address, Type type = Type::Unknown) : IPAddress() {
             auto init = [&](Type type) {
                 switch (type) {
                 case Type::IPv6:
@@ -107,7 +109,7 @@ namespace icmplib {
                     (reinterpret_cast<sockaddr_in6 *>(this->address))->sin6_family = AF_INET6;
                     if (inet_pton(AF_INET6, address.c_str(), &(reinterpret_cast<sockaddr_in6 *>(this->address))->sin6_addr) <= 0) {
                         delete this->address;
-                        throw std::runtime_error("Incorrect IPv6 address provided!");
+                        throw std::runtime_error("Incorrect IPv6 address provided");
                     }
                     break;
                 case Type::IPv4:
@@ -117,7 +119,7 @@ namespace icmplib {
                     (reinterpret_cast<sockaddr_in *>(this->address))->sin_family = AF_INET;
                     if (inet_pton(AF_INET, address.c_str(), &(reinterpret_cast<sockaddr_in *>(this->address))->sin_addr) <= 0) {
                         delete this->address;
-                        throw std::runtime_error("Incorrect IPv4 address provided!");
+                        throw std::runtime_error("Incorrect IPv4 address provided");
                     }
                 }
             };
@@ -138,16 +140,16 @@ namespace icmplib {
                 Resolve(address, type);
             }
         }
-        AddressIP(const std::string &address, uint16_t port, Type type = Type::Unknown) : AddressIP(address, type) {
+        IPAddress(const std::string &address, uint16_t port, Type type = Type::Unknown) : IPAddress(address, type) {
             SetPort(port);
         }
-        AddressIP(unsigned long address) : AddressIP() {
-            (reinterpret_cast<sockaddr_in *>(this->address))->sin_addr.s_addr = address;
+        IPAddress(unsigned long address) : IPAddress() {
+            (reinterpret_cast<sockaddr_in *>(this->address))->sin_addr.s_addr = htonl(address);
         }
-        AddressIP(unsigned long address, uint16_t port) : AddressIP(address) {
+        IPAddress(unsigned long address, uint16_t port) : IPAddress(address) {
             SetPort(port);
         }
-        AddressIP(const AddressIP &source) {
+        IPAddress(const IPAddress &source) {
             switch (source.GetType()) {
             case Type::IPv6:
                 address = reinterpret_cast<sockaddr *>(new sockaddr_in6);
@@ -159,16 +161,16 @@ namespace icmplib {
                 std::memcpy(address, source.address, sizeof(sockaddr_in));
             }
         }
-        AddressIP(AddressIP &&source) {
+        IPAddress(IPAddress &&source) {
             address = source.address;
             source.address = reinterpret_cast<sockaddr *>(new sockaddr_in);
             std::memset(source.address, 0, sizeof(sockaddr_in));
             (reinterpret_cast<sockaddr_in *>(source.address))->sin_family = AF_INET;
         }
-        virtual ~AddressIP() {
+        virtual ~IPAddress() {
             delete address;
         }
-        AddressIP &operator=(const AddressIP &source) {
+        IPAddress &operator=(const IPAddress &source) {
             delete address;
             switch (source.GetType()) {
             case Type::IPv6:
@@ -182,7 +184,7 @@ namespace icmplib {
             }
             return *this;
         }
-        AddressIP &operator=(AddressIP &&source) {
+        IPAddress &operator=(IPAddress &&source) {
             delete address;
             address = source.address;
             source.address = reinterpret_cast<sockaddr *>(new sockaddr_in);
@@ -190,7 +192,7 @@ namespace icmplib {
             (reinterpret_cast<sockaddr_in *>(source.address))->sin_family = AF_INET;
             return *this;
         }
-        AddressIP &Resolve(const std::string &address, Type type = Type::IPv4) {
+        IPAddress &Resolve(const std::string &address, Type type = Type::IPv4) {
 #ifdef _WIN32
             WinSock::Initialize();
 #endif
@@ -232,7 +234,7 @@ namespace icmplib {
             }
             throw std::runtime_error("Cannot resolve address: " + address);
         }
-        std::string ToString() const {
+        operator std::string() const {
             char buffer[INET6_ADDRSTRLEN];
             switch (GetType()) {
             case Type::IPv6:
@@ -248,6 +250,9 @@ namespace icmplib {
                 throw std::runtime_error("Cannot convert IPv4 address structure");
             }
         }
+        bool operator==(const IPAddress &compare) const noexcept {
+            return (static_cast<std::string>(*this) == static_cast<std::string>(compare)) && (this->GetPort() == compare.GetPort());
+        }
         void SetPort(uint16_t port) {
             switch (GetType()) {
             case Type::IPv6:
@@ -261,11 +266,11 @@ namespace icmplib {
         uint16_t GetPort() const {
             switch (GetType()) {
             case Type::IPv6:
-                return (reinterpret_cast<sockaddr_in6 *>(address))->sin6_port;
+                return ntohs((reinterpret_cast<sockaddr_in6 *>(address))->sin6_port);
                 break;
             case Type::IPv4:
             default:
-                return (reinterpret_cast<sockaddr_in *>(address))->sin_port;
+                return ntohs((reinterpret_cast<sockaddr_in *>(address))->sin_port);
             }
         }
         Type GetType() const {
@@ -280,11 +285,7 @@ namespace icmplib {
         sockaddr *GetSockAddr() const {
             return address;
         }
-#ifdef _WIN32
-        int GetSockAddrLength() const {
-#else
-        socklen_t GetSockAddrLength() const {
-#endif
+        ICMPLIB_SOCKLEN GetSockAddrLength() const {
             switch (GetType()) {
             case Type::IPv6:
                 return sizeof(sockaddr_in6);
@@ -294,7 +295,10 @@ namespace icmplib {
             }
         }
         static inline bool IsCorrect(const std::string &address, Type type = Type::IPv4) {
-            return (type != Type::IPv6) ?
+            if (type == Type::Unknown) {
+                return IsCorrect(address, Type::IPv4) || IsCorrect(address, Type::IPv6);
+            }
+            return (type == Type::IPv4) ?
                 std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")) :
                 std::regex_match(address, std::regex("^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"));
         }
@@ -323,7 +327,7 @@ namespace icmplib {
                 Failure
             } response;
             double interval;
-            AddressIP address;
+            IPAddress address;
             uint8_t code;
             uint8_t ttl;
         };
@@ -331,8 +335,8 @@ namespace icmplib {
         ICMPEcho(const ICMPEcho &) = delete;
         ICMPEcho(ICMPEcho &&) = delete;
         ICMPEcho &operator=(const ICMPEcho &) = delete;
-        static Result Execute(const AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
-            Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), AddressIP(), 0, 0 };
+        static Result Execute(const IPAddress &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+            Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), IPAddress(), 0, 0 };
             try {
 #ifdef _WIN32
                 WinSock::Initialize();
@@ -342,7 +346,7 @@ namespace icmplib {
                 ICMPRequest request(target.GetType(), sequence);
                 request.Send(sock.GetSocket(), target);
                 auto start = std::chrono::high_resolution_clock::now();
-                AddressIP source(target);
+                IPAddress source(target);
 
                 while (true) {
                     ICMPResponse response;
@@ -356,7 +360,7 @@ namespace icmplib {
                         continue;
                     }
 
-                    result.response = (source.GetType() != AddressIP::Type::IPv6) ? GetResponseType(request, response) : GetResponseTypeV6(request, response);
+                    result.response = (source.GetType() != IPAddress::Type::IPv6) ? GetResponseType(request, response) : GetResponseTypeV6(request, response);
                     if (result.response != Result::ResponseType::Timeout) {
                         result.interval = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
                         result.address = source;
@@ -366,7 +370,7 @@ namespace icmplib {
                     }
                 }
             } catch (...) {
-                return { Result::ResponseType::Failure, 0, AddressIP(), 0, 0 };
+                return { Result::ResponseType::Failure, 0, IPAddress(), 0, 0 };
             }
             return result;
         }
@@ -390,13 +394,13 @@ namespace icmplib {
 
         class ICMPSocket {
         public:
-            ICMPSocket(AddressIP::Type type, uint8_t ttl) {
+            ICMPSocket(IPAddress::Type type, uint8_t ttl) {
                 int protocol = IPPROTO_ICMP;
-                if (type == AddressIP::Type::IPv6) {
+                if (type == IPAddress::Type::IPv6) {
                     protocol = IPPROTO_ICMPV6;
                 }
 
-                sock = socket(AddressIP::GetFamily(type), SOCK_RAW, protocol);
+                sock = socket(IPAddress::GetFamily(type), SOCK_RAW, protocol);
 #ifdef _WIN32
                 if (sock == INVALID_SOCKET) {
 #else
@@ -406,13 +410,13 @@ namespace icmplib {
                 }
 
                 switch (type) {
-                case AddressIP::Type::IPv6:
+                case IPAddress::Type::IPv6:
                     if (setsockopt(sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
                         ICMPLIB_CLOSESOCKET(sock);
                         throw std::runtime_error("Cannot set socket options!");
                     }
                     break;
-                case AddressIP::Type::IPv4:
+                case IPAddress::Type::IPv4:
                 default:
                     if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
                         ICMPLIB_CLOSESOCKET(sock);
@@ -444,16 +448,16 @@ namespace icmplib {
         class ICMPRequest : public ICMPEchoMessage {
         public:
             ICMPRequest() = delete;
-            ICMPRequest(AddressIP::Type protocol, uint16_t sequence = 1) {
+            ICMPRequest(IPAddress::Type protocol, uint16_t sequence = 1) {
                 std::memset(this, 0, sizeof(ICMPEchoMessage));
                 id = rand() % USHRT_MAX;
-                type = (protocol != AddressIP::Type::IPv6) ? ICMPLIB_ICMP_ECHO_REQUEST : ICMPLIB_ICMPV6_ECHO_REQUEST;
+                type = (protocol != IPAddress::Type::IPv6) ? ICMPLIB_ICMP_ECHO_REQUEST : ICMPLIB_ICMPV6_ECHO_REQUEST;
                 seq = sequence;
-                if (protocol != AddressIP::Type::IPv6) {
+                if (protocol != IPAddress::Type::IPv6) {
                     SetChecksum<ICMPEchoMessage>(*this);
                 }
             }
-            void Send(ICMPLIB_SOCKET sock, const AddressIP &address) {
+            void Send(ICMPLIB_SOCKET sock, const IPAddress &address) {
                 int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, address.GetSockAddr(), address.GetSockAddrLength());
                 if (bytes == ICMPLIB_SOCKET_ERROR) {
                     throw std::runtime_error("Failed to send request!");
@@ -463,7 +467,7 @@ namespace icmplib {
 
         class ICMPResponse {
         public:
-            ICMPResponse() : protocol(AddressIP::Type::IPv4), header(nullptr), length(0) {
+            ICMPResponse() : protocol(IPAddress::Type::IPv4), header(nullptr), length(0) {
                 std::memset(&buffer, 0, sizeof(uint8_t) * ICMPLIB_RECV_BUFFER_SIZE);
             }
             virtual ~ICMPResponse() {
@@ -471,12 +475,8 @@ namespace icmplib {
                     delete header;
                 }
             }
-            bool Receive(ICMPLIB_SOCKET sock, AddressIP &address) {
-#ifdef _WIN32
-                int length = address.GetSockAddrLength();
-#else
-                socklen_t length = address.GetSockAddrLength();
-#endif
+            bool Receive(ICMPLIB_SOCKET sock, IPAddress &address) {
+                ICMPLIB_SOCKLEN length = address.GetSockAddrLength();
                 int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, address.GetSockAddr(), &length);
                 if (bytes <= 0) {
                     return false;
@@ -493,10 +493,10 @@ namespace icmplib {
                 T packet;
                 std::memset(&packet, 0, sizeof(T));
                 switch (protocol) {
-                case AddressIP::Type::IPv6:
+                case IPAddress::Type::IPv6:
                     std::memcpy(&packet, buffer, static_cast<long unsigned>(length) > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length));
                     break;
-                case AddressIP::Type::IPv4:
+                case IPAddress::Type::IPv4:
                 default:
                     std::memcpy(&packet, &buffer[ICMPLIB_INET4_HEADER_SIZE], static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE);
                 }
@@ -509,31 +509,31 @@ namespace icmplib {
                 }
                 return *header;
             }
-            inline AddressIP::Type GetProtocol() const {
+            inline IPAddress::Type GetProtocol() const {
                 return protocol;
             }
             inline const uint8_t GetTTL() {
                 switch (protocol) {
-                case AddressIP::Type::IPv6:
+                case IPAddress::Type::IPv6:
                     return 0;
                     break;
-                case AddressIP::Type::IPv4:
+                case IPAddress::Type::IPv4:
                 default:
                     return buffer[ICMPLIB_INET4_TTL_OFFSET];
                 }
             }
             inline const unsigned GetSize() {
                 switch (protocol) {
-                case AddressIP::Type::IPv6:
+                case IPAddress::Type::IPv6:
                     return length;
                     break;
-                case AddressIP::Type::IPv4:
+                case IPAddress::Type::IPv4:
                 default:
                     return length - ICMPLIB_INET4_HEADER_SIZE;
                 }
             }
         private:
-            AddressIP::Type protocol;
+            IPAddress::Type protocol;
             uint8_t buffer[ICMPLIB_RECV_BUFFER_SIZE];
             ICMPHeader *header;
             unsigned length;
@@ -621,7 +621,7 @@ namespace icmplib {
     using PingResult = ICMPEcho::Result;
     using PingResponseType = ICMPEcho::Result::ResponseType;
 
-    PingResult Ping(const AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+    PingResult Ping(const IPAddress &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
         return ICMPEcho::Execute(target, timeout, sequence, ttl);
     }
 }
