@@ -14,14 +14,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    int ret = 0;
+    int ret = EXIT_SUCCESS;
     std::cout << "Pinging " << (resolved.empty() ? address : resolved + " [" + address + "]")
               << " with " << ICMPLIB_PING_DATA_SIZE << " bytes of data:" << std::endl;
     auto result = icmplib::Ping(address);
     switch (result.response) {
     case icmplib::PingResponseType::Failure:
         std::cout << "Network error." << std::endl;
-        ret = 1;
+        ret = EXIT_FAILURE;
         break;
     case icmplib::PingResponseType::Timeout:
         std::cout << "Request timed out." << std::endl;
