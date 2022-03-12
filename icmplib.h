@@ -621,7 +621,7 @@ namespace icmplib {
     using PingResult = ICMPEcho::Result;
     using PingResponseType = ICMPEcho::Result::ResponseType;
 
-    PingResult Ping(const IPAddress &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+    static PingResult Ping(const IPAddress &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
         return ICMPEcho::Execute(target, timeout, sequence, ttl);
     }
 }
