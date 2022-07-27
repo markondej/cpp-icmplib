@@ -32,7 +32,7 @@ struct PingResult {
     uint8_t ttl;
 };
 ```
-where:
+Notice:
 * interval - Time in miliseconds between sending request and receiving response
 * address - Address of responding host
 * code - ICMP Code parameter
