@@ -9,7 +9,7 @@ icmplib delivers function Ping declared as:
 ```
 PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255);
 ```
-where:
+Notice:
 * target - Network address (may be created from std::string)
 * timeout - Timeout in seconds
 * sequence - Sequence number to be sent
