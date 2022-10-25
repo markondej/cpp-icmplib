@@ -25,11 +25,10 @@
 		</Build>
 		<Compiler>
 			<Add option="-Wall" />
-			<Add option="-fpermissive" />
+			<Add option="-std=c++11" />
 			<Add directory="../" />
 		</Compiler>
 		<Linker>
-			<Add option="-static" />
 			<Add library="ws2_32" />
 		</Linker>
 		<Unit filename="../icmplib.h" />
