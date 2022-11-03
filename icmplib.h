@@ -294,7 +294,7 @@ namespace icmplib {
                 return sizeof(sockaddr_in);
             }
         }
-        static inline bool IsCorrect(const std::string &address, Type type = Type::IPv4) {
+        static bool IsCorrect(const std::string &address, Type type = Type::IPv4) {
             switch (type) {
             case Type::IPv4:
                 return std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"));
@@ -304,7 +304,7 @@ namespace icmplib {
                 return IsCorrect(address, Type::IPv4) || IsCorrect(address, Type::IPv6);
             }
         }
-        static inline int GetFamily(Type type) {
+        static int GetFamily(Type type) {
             switch (type) {
             case Type::IPv6:
                 return AF_INET6;
@@ -440,7 +440,7 @@ namespace icmplib {
             virtual ~ICMPSocket() {
                 ICMPLIB_CLOSESOCKET(sock);
             }
-            inline const ICMPLIB_SOCKET &GetSocket() {
+            const ICMPLIB_SOCKET &GetSocket() {
                 return sock;
             }
         private:
@@ -511,10 +511,10 @@ namespace icmplib {
                 }
                 return *header;
             }
-            inline IPAddress::Type GetProtocol() const {
+            IPAddress::Type GetProtocol() const {
                 return protocol;
             }
-            inline const uint8_t GetTTL() {
+            uint8_t GetTTL() const {
                 switch (protocol) {
                 case IPAddress::Type::IPv6:
                     return 0;
@@ -524,7 +524,7 @@ namespace icmplib {
                     return buffer[ICMPLIB_INET4_TTL_OFFSET];
                 }
             }
-            inline const unsigned GetSize() {
+            unsigned GetSize() const {
                 switch (protocol) {
                 case IPAddress::Type::IPv6:
                     return length;
