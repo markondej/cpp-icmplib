@@ -98,53 +98,48 @@ namespace icmplib {
         IPAddress() {
             address = reinterpret_cast<sockaddr *>(new sockaddr_in);
             std::memset(address, 0, sizeof(sockaddr_in));
-            (reinterpret_cast<sockaddr_in *>(address))->sin_family = AF_INET;
+            reinterpret_cast<sockaddr_in *>(address)->sin_family = AF_INET;
         }
-        IPAddress(const std::string &address, Type type = Type::Unknown) {
+        IPAddress(const std::string &address, Type type = Type::Unknown) : IPAddress() {
             auto init = [&](Type type) {
                 switch (type) {
                 case Type::IPv6:
+                    delete this->address;
                     this->address = reinterpret_cast<sockaddr *>(new sockaddr_in6);
                     std::memset(this->address, 0, sizeof(sockaddr_in6));
-                    (reinterpret_cast<sockaddr_in6 *>(this->address))->sin6_family = AF_INET6;
-                    if (inet_pton(AF_INET6, address.c_str(), &(reinterpret_cast<sockaddr_in6 *>(this->address))->sin6_addr) <= 0) {
+                    reinterpret_cast<sockaddr_in6 *>(this->address)->sin6_family = AF_INET6;
+                    if (inet_pton(AF_INET6, address.c_str(), &reinterpret_cast<sockaddr_in6 *>(this->address)->sin6_addr) <= 0) {
                         delete this->address;
                         throw std::runtime_error("Incorrect IPv6 address provided");
                     }
                     break;
                 case Type::IPv4:
                 default:
-                    this->address = reinterpret_cast<sockaddr *>(new sockaddr_in);
-                    std::memset(this->address, 0, sizeof(sockaddr_in));
-                    (reinterpret_cast<sockaddr_in *>(this->address))->sin_family = AF_INET;
-                    if (inet_pton(AF_INET, address.c_str(), &(reinterpret_cast<sockaddr_in *>(this->address))->sin_addr) <= 0) {
+                    if (inet_pton(AF_INET, address.c_str(), &reinterpret_cast<sockaddr_in *>(this->address)->sin_addr) <= 0) {
                         delete this->address;
                         throw std::runtime_error("Incorrect IPv4 address provided");
                     }
                 }
             };
-            bool resolve = true;
             if ((type != Type::Unknown) && IsCorrect(address, type)) {
                 init(type);
-                resolve = false;
+                return;
             } else if (type == Type::Unknown) {
                 if (IsCorrect(address, Type::IPv4)) {
                     init(Type::IPv4);
-                    resolve = false;
+                    return;
                 } else if (IsCorrect(address, Type::IPv6)) {
                     init(Type::IPv6);
-                    resolve = false;
+                    return;
                 }
             }
-            if (resolve) {
-                Resolve(address, type);
-            }
+            Resolve(address, type);
         }
         IPAddress(const std::string &address, uint16_t port, Type type = Type::Unknown) : IPAddress(address, type) {
             SetPort(port);
         }
         IPAddress(unsigned long address) : IPAddress() {
-            (reinterpret_cast<sockaddr_in *>(this->address))->sin_addr.s_addr = htonl(address);
+            reinterpret_cast<sockaddr_in *>(this->address)->sin_addr.s_addr = htonl(address);
         }
         IPAddress(unsigned long address, uint16_t port) : IPAddress(address) {
             SetPort(port);
@@ -165,7 +160,7 @@ namespace icmplib {
             address = source.address;
             source.address = reinterpret_cast<sockaddr *>(new sockaddr_in);
             std::memset(source.address, 0, sizeof(sockaddr_in));
-            (reinterpret_cast<sockaddr_in *>(source.address))->sin_family = AF_INET;
+            reinterpret_cast<sockaddr_in *>(source.address)->sin_family = AF_INET;
         }
         virtual ~IPAddress() {
             delete address;
@@ -189,7 +184,7 @@ namespace icmplib {
             address = source.address;
             source.address = reinterpret_cast<sockaddr *>(new sockaddr_in);
             std::memset(source.address, 0, sizeof(sockaddr_in));
-            (reinterpret_cast<sockaddr_in *>(source.address))->sin_family = AF_INET;
+            reinterpret_cast<sockaddr_in *>(source.address)->sin_family = AF_INET;
             return *this;
         }
         IPAddress &Resolve(const std::string &address, Type type = Type::IPv4) {
@@ -232,45 +227,42 @@ namespace icmplib {
                 }
                 freeaddrinfo(result);
             }
-            throw std::runtime_error("Cannot resolve address: " + address);
+            throw std::runtime_error("Cannot resolve host address: " + address);
         }
         operator std::string() const {
             char buffer[INET6_ADDRSTRLEN];
             switch (GetType()) {
             case Type::IPv6:
-                if (inet_ntop(AF_INET6, &(reinterpret_cast<sockaddr_in6 *>(address))->sin6_addr, buffer, INET6_ADDRSTRLEN) != NULL) {
+                if (inet_ntop(AF_INET6, &reinterpret_cast<sockaddr_in6 *>(address)->sin6_addr, buffer, INET6_ADDRSTRLEN) != NULL) {
                     return std::string(buffer);
                 }
                 throw std::runtime_error("Cannot convert IPv6 address structure");
             case Type::IPv4:
             default:
-                if (inet_ntop(AF_INET, &(reinterpret_cast<sockaddr_in *>(address))->sin_addr, buffer, INET6_ADDRSTRLEN) != NULL) {
+                if (inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in *>(address)->sin_addr, buffer, INET6_ADDRSTRLEN) != NULL) {
                     return std::string(buffer);
                 }
                 throw std::runtime_error("Cannot convert IPv4 address structure");
             }
         }
-        bool operator==(const IPAddress &compare) const noexcept {
-            return (static_cast<std::string>(*this) == static_cast<std::string>(compare)) && (this->GetPort() == compare.GetPort());
-        }
         void SetPort(uint16_t port) {
             switch (GetType()) {
             case Type::IPv6:
-                (reinterpret_cast<sockaddr_in6 *>(address))->sin6_port = htons(port);
+                reinterpret_cast<sockaddr_in6 *>(address)->sin6_port = htons(port);
                 break;
             case Type::IPv4:
             default:
-                (reinterpret_cast<sockaddr_in *>(address))->sin_port = htons(port);
+                reinterpret_cast<sockaddr_in *>(address)->sin_port = htons(port);
             }
         }
         uint16_t GetPort() const {
             switch (GetType()) {
             case Type::IPv6:
-                return ntohs((reinterpret_cast<sockaddr_in6 *>(address))->sin6_port);
+                return ntohs(reinterpret_cast<sockaddr_in6 *>(address)->sin6_port);
                 break;
             case Type::IPv4:
             default:
-                return ntohs((reinterpret_cast<sockaddr_in *>(address))->sin_port);
+                return ntohs(reinterpret_cast<sockaddr_in *>(address)->sin_port);
             }
         }
         Type GetType() const {
