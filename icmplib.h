@@ -605,7 +605,7 @@ namespace icmplib {
             if (size > 0) {
                 sum += *reinterpret_cast<uint8_t *>(element);
             }
-            sum = (sum >> 16) + (sum & 0xFFFF);
+            sum = (sum >> 16) + (sum & 0xffff);
             sum += (sum >> 16);
             packet.checksum = static_cast<uint16_t>(~sum);
             return packet.checksum;
