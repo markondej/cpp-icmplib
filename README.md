@@ -1,7 +1,7 @@
 # A C++ header-only ICMP/ICMPv6 Ping library
 
-This is cross-platform library, which allows performing system-like ping requests from C++ applications without need of use system "ping" command.
-As library is socket-based, on most operating systems, it will require administrator privilages (root) to run.
+cpp-icmplib is simple header-only cross-platform library, which allows performing system-like ping requests from C++ applications without need of using system "ping" command.
+As this library is socket-based, on most operating systems, it will require administrator privilages (root) to run.
 
 ## How to use
 
@@ -26,14 +26,14 @@ struct PingResult {
         Unsupported,
         Failure
     } response;
-    double interval;
+    double delay;
     icmplib::AddressIP address;
     uint8_t code;
     uint8_t ttl;
 };
 ```
 Notice:
-* interval - Time in miliseconds between sending request and receiving response
+* delay - Time in miliseconds between sending request and receiving response
 * address - Address of responding host
 * code - ICMP Code parameter
 * ttl - Received IPv4 header TTL parameter 

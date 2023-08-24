@@ -320,7 +320,7 @@ namespace icmplib {
                 Unsupported,
                 Failure
             } response;
-            double interval;
+            double delay;
             IPAddress address;
             uint8_t code;
             uint8_t ttl;
@@ -356,7 +356,7 @@ namespace icmplib {
 
                     result.response = (source.GetType() != IPAddress::Type::IPv6) ? GetResponseType(request, response) : GetResponseTypeV6(request, response);
                     if (result.response != Result::ResponseType::Timeout) {
-                        result.interval = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
+                        result.delay = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
                         result.address = source;
                         result.code = response.GetICMPHeader().code;
                         result.ttl = response.GetTTL();

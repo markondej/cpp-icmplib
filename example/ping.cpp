@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
         std::cout << "Reply from " << static_cast<std::string>(result.address) << ": ";
         switch (result.response) {
         case icmplib::PingResponseType::Success:
-            std::cout << "time=" << result.interval;
+            std::cout << "time=" << result.delay;
             if (result.address.GetType() != icmplib::IPAddress::Type::IPv6) {
                 std::cout << " TTL=" << static_cast<unsigned>(result.ttl);
             }
