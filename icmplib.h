@@ -109,14 +109,12 @@ namespace icmplib {
                     std::memset(this->address, 0, sizeof(sockaddr_in6));
                     reinterpret_cast<sockaddr_in6 *>(this->address)->sin6_family = AF_INET6;
                     if (inet_pton(AF_INET6, address.c_str(), &reinterpret_cast<sockaddr_in6 *>(this->address)->sin6_addr) <= 0) {
-                        delete this->address;
                         throw std::runtime_error("Incorrect IPv6 address provided");
                     }
                     break;
                 case Type::IPv4:
                 default:
                     if (inet_pton(AF_INET, address.c_str(), &reinterpret_cast<sockaddr_in *>(this->address)->sin_addr) <= 0) {
-                        delete this->address;
                         throw std::runtime_error("Incorrect IPv4 address provided");
                     }
                 }
@@ -138,10 +136,10 @@ namespace icmplib {
         IPAddress(const std::string &address, uint16_t port, Type type = Type::Unknown) : IPAddress(address, type) {
             SetPort(port);
         }
-        IPAddress(unsigned long address) : IPAddress() {
+        IPAddress(uint32_t address) : IPAddress() {
             reinterpret_cast<sockaddr_in *>(this->address)->sin_addr.s_addr = htonl(address);
         }
-        IPAddress(unsigned long address, uint16_t port) : IPAddress(address) {
+        IPAddress(uint32_t address, uint16_t port) : IPAddress(address) {
             SetPort(port);
         }
         IPAddress(const IPAddress &source) {
