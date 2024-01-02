@@ -463,7 +463,7 @@ namespace icmplib {
                 std::memset(&buffer, 0, sizeof(uint8_t) * ICMPLIB_RECV_BUFFER_SIZE);
             }
             virtual ~ICMPResponse() {
-                if (header != nullptr) {
+                if (header) {
                     delete header;
                 }
             }
@@ -495,7 +495,7 @@ namespace icmplib {
                 return packet;
             }
             const ICMPHeader &GetICMPHeader() {
-                if (header == nullptr) {
+                if (!header) {
                     header = new ICMPHeader;
                     *header = Generate<ICMPHeader>();
                 }
