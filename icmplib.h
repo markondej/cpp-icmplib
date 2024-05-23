@@ -470,13 +470,14 @@ namespace icmplib {
             }
             bool Receive(ICMPLIB_SOCKET sock, IPAddress &address, unsigned timeout) {
                 fd_set sock_set;
+                FD_ZERO(&sock_set);
                 FD_SET(sock, &sock_set);
 
                 timeval timeout_val;
                 timeout_val.tv_sec = timeout / 1000;
                 timeout_val.tv_usec = (timeout % 1000) * 1000;
 
-                int activity = select(sock + 1, &sock_set, NULL, NULL, &t_val);
+                int activity = select(sock + 1, &sock_set, NULL, NULL, &timeout_val);
                 if ((activity <= 0) | !FD_ISSET(sock, &sock_set)) {
                     return false;
                 }
