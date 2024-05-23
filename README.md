@@ -7,11 +7,11 @@ As this library is socket-based, on most operating systems, it will require admi
 
 icmplib delivers function Ping declared as:
 ```
-PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255);
+PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255);
 ```
 Notice:
 * target - Network address (may be created from std::string)
-* timeout - Timeout in seconds
+* timeout - Timeout in milliseconds
 * sequence - Sequence number to be sent
 * ttl - Time-to-live to be set for packet
 
@@ -60,7 +60,7 @@ In order to make internet connection test simply use:
 
 bool isConnected()
 {
-    return icmplib::Ping("8.8.8.8", 5).response == icmplib::PingResponseType::Success; // Test Google DNS address
+    return icmplib::Ping("8.8.8.8", 1000).response == icmplib::PingResponseType::Success; // Test Google DNS address
 }
 ```
 
@@ -74,7 +74,7 @@ std::vector<std::string> traceroute(const std::string &address)
 {
     std::vector<std::string> result;
     for (uint8_t ttl = 1; ttl != 0; ttl++) {
-        auto ping = icmplib::Ping(address, 5, 1, ttl);
+        auto ping = icmplib::Ping(address, 1000, 1, ttl);
         switch (ping.response) {
         case icmplib::PingResult::ResponseType::TimeExceeded:
             result.push_back(ping.address.ToString());

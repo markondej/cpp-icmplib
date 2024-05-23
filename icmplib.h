@@ -327,7 +327,7 @@ namespace icmplib {
         ICMPEcho(const ICMPEcho &) = delete;
         ICMPEcho(ICMPEcho &&) = delete;
         ICMPEcho &operator=(const ICMPEcho &) = delete;
-        static Result Execute(const IPAddress &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+        static Result Execute(const IPAddress &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255) {
             Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), IPAddress(), 0, 0 };
             try {
 #ifdef _WIN32
@@ -345,7 +345,7 @@ namespace icmplib {
                     bool recv = response.Receive(sock.GetSocket(), source);
                     auto end = std::chrono::high_resolution_clock::now();
                     if (!recv) {
-                        if (static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(end - start).count()) > timeout) {
+                        if (static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()) > timeout) {
                             break;
                         }
                         std::this_thread::sleep_for(std::chrono::microseconds(ICMPLIB_NOP_DELAY));
@@ -613,7 +613,7 @@ namespace icmplib {
     using PingResult = ICMPEcho::Result;
     using PingResponseType = ICMPEcho::Result::ResponseType;
 
-    inline PingResult Ping(const IPAddress &target, unsigned timeout = 60, uint16_t sequence = 1, uint8_t ttl = 255) {
+    inline PingResult Ping(const IPAddress &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255) {
         return ICMPEcho::Execute(target, timeout, sequence, ttl);
     }
 }
