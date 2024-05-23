@@ -60,7 +60,7 @@ In order to make internet connection test simply use:
 
 bool isConnected()
 {
-    return icmplib::Ping("8.8.8.8", 1000).response == icmplib::PingResponseType::Success; // Test Google DNS address
+    return icmplib::Ping("8.8.8.8", ICMPLIB_TIMEOUT_1S).response == icmplib::PingResponseType::Success; // Test Google DNS address
 }
 ```
 
@@ -74,7 +74,7 @@ std::vector<std::string> traceroute(const std::string &address)
 {
     std::vector<std::string> result;
     for (uint8_t ttl = 1; ttl != 0; ttl++) {
-        auto ping = icmplib::Ping(address, 1000, 1, ttl);
+        auto ping = icmplib::Ping(address, ICMPLIB_TIMEOUT_1S, 1, ttl);
         switch (ping.response) {
         case icmplib::PingResult::ResponseType::TimeExceeded:
             result.push_back(ping.address.ToString());

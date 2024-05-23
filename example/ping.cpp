@@ -17,7 +17,7 @@ int main(int argc, char *argv[])
     int ret = EXIT_SUCCESS;
     std::cout << "Pinging " << (resolved.empty() ? address : resolved + " [" + address + "]")
               << " with " << ICMPLIB_PING_DATA_SIZE << " bytes of data:" << std::endl;
-    auto result = icmplib::Ping(address);
+    auto result = icmplib::Ping(address, ICMPLIB_TIMEOUT_1S);
     switch (result.response) {
     case icmplib::PingResponseType::Failure:
         std::cout << "Network error." << std::endl;

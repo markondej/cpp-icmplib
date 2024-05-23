@@ -41,7 +41,7 @@
 #define ICMPLIB_INET4_ORIGINAL_DATA_SIZE ICMPLIB_INET4_HEADER_SIZE + 8
 #define ICMPLIB_INET6_ORIGINAL_DATA_SIZE 8
 
-#define ICMPLIB_NOP_DELAY 10
+#define ICMPLIB_TIMEOUT_1S 1000
 
 #ifdef _WIN32
 #define ICMPLIB_SOCKET SOCKET
@@ -327,7 +327,7 @@ namespace icmplib {
         ICMPEcho(const ICMPEcho &) = delete;
         ICMPEcho(ICMPEcho &&) = delete;
         ICMPEcho &operator=(const ICMPEcho &) = delete;
-        static Result Execute(const IPAddress &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255) {
+        static Result Execute(const IPAddress &target, unsigned timeout = ICMPLIB_TIMEOUT_1S, uint16_t sequence = 1, uint8_t ttl = 255) {
             Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), IPAddress(), 0, 0 };
             try {
 #ifdef _WIN32
@@ -342,13 +342,14 @@ namespace icmplib {
 
                 while (true) {
                     ICMPResponse response;
-                    bool recv = response.Receive(sock.GetSocket(), source);
+                    bool recv = response.Receive(sock.GetSocket(), source, timeout);
                     auto end = std::chrono::high_resolution_clock::now();
                     if (!recv) {
-                        if (static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()) > timeout) {
+                        unsigned delta = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+                        if (delta >= timeout) {
                             break;
                         }
-                        std::this_thread::sleep_for(std::chrono::microseconds(ICMPLIB_NOP_DELAY));
+                        timeout -= delta;
                         continue;
                     }
 
@@ -467,7 +468,19 @@ namespace icmplib {
                     delete header;
                 }
             }
-            bool Receive(ICMPLIB_SOCKET sock, IPAddress &address) {
+            bool Receive(ICMPLIB_SOCKET sock, IPAddress &address, unsigned timeout) {
+                fd_set sock_set;
+                FD_SET(sock, &sock_set);
+
+                timeval timeout_val;
+                timeout_val.tv_sec = timeout / 1000;
+                timeout_val.tv_usec = (timeout % 1000) * 1000;
+
+                int activity = select(sock + 1, &sock_set, NULL, NULL, &t_val);
+                if ((activity <= 0) | !FD_ISSET(sock, &sock_set)) {
+                    return false;
+                }
+
                 ICMPLIB_SOCKLEN length = address.GetSockAddrLength();
                 int bytes = recvfrom(sock, reinterpret_cast<char *>(buffer), ICMPLIB_RECV_BUFFER_SIZE, 0, address.GetSockAddr(), &length);
                 if (bytes <= 0) {
@@ -613,7 +626,7 @@ namespace icmplib {
     using PingResult = ICMPEcho::Result;
     using PingResponseType = ICMPEcho::Result::ResponseType;
 
-    inline PingResult Ping(const IPAddress &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255) {
+    inline PingResult Ping(const IPAddress &target, unsigned timeout = ICMPLIB_TIMEOUT_1S, uint16_t sequence = 1, uint8_t ttl = 255) {
         return ICMPEcho::Execute(target, timeout, sequence, ttl);
     }
 }
