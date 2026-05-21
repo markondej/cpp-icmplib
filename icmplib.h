@@ -11,6 +11,7 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <chrono>
+#include <random>
 #include <string>
 #include <thread>
 #include <regex>
@@ -39,7 +40,8 @@
 #define ICMPLIB_INET4_HEADER_SIZE 20
 #define ICMPLIB_INET4_TTL_OFFSET 8
 #define ICMPLIB_INET4_ORIGINAL_DATA_SIZE ICMPLIB_INET4_HEADER_SIZE + 8
-#define ICMPLIB_INET6_ORIGINAL_DATA_SIZE 8
+#define ICMPLIB_INET6_HEADER_SIZE 40
+#define ICMPLIB_INET6_ORIGINAL_DATA_SIZE ICMPLIB_INET6_HEADER_SIZE + 8
 
 #define ICMPLIB_TIMEOUT_1S 1000
 
@@ -184,6 +186,24 @@ namespace icmplib {
             std::memset(source.address, 0, sizeof(sockaddr_in));
             reinterpret_cast<sockaddr_in *>(source.address)->sin_family = AF_INET;
             return *this;
+        }
+        bool operator==(const uint8_t *other) const {
+            return (GetType() == Type::IPv6) && (std::memcmp(&reinterpret_cast<sockaddr_in6 *>(address)->sin6_addr, other, sizeof(in6_addr)) == 0);
+        }
+        bool operator==(const uint32_t other) const {
+            return (GetType() == Type::IPv4) && (reinterpret_cast<sockaddr_in *>(address)->sin_addr.s_addr == other);
+        }
+        bool operator==(const IPAddress &other) const {
+            if (GetType() != other.GetType()) {
+                return false;
+            }
+            switch (GetType()) {
+            case Type::IPv6:
+                return IPAddress::operator==(reinterpret_cast<const uint8_t *>(&reinterpret_cast<const sockaddr_in6 *>(other.address)->sin6_addr));
+            case Type::IPv4:
+            default:
+                return IPAddress::operator==(reinterpret_cast<const sockaddr_in *>(other.address)->sin_addr.s_addr);
+            }
         }
         IPAddress &Resolve(const std::string &address, Type type = Type::IPv4) {
 #ifdef _WIN32
@@ -352,9 +372,16 @@ namespace icmplib {
                         timeout -= delta;
                         continue;
                     }
+                    if (response.GetSize() < sizeof(ICMPHeader)) {
+                        continue;
+                    }
 
-                    result.response = (source.GetType() != IPAddress::Type::IPv6) ? GetResponseType(request, response) : GetResponseTypeV6(request, response);
-                    if (result.response != Result::ResponseType::Timeout) {
+                    bool is_ipv6 = (source.GetType() == IPAddress::Type::IPv6);
+                    ClassifyResult match = is_ipv6
+                        ? GetResponseTypeV6(request, target, source, response)
+                        : GetResponseType(request, target, source, response);
+                    if (match.matched) {
+                        result.response = match.type;
                         result.delay = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
                         result.address = source;
                         result.code = response.GetICMPHeader().code;
@@ -374,16 +401,50 @@ namespace icmplib {
             uint16_t checksum;
         };
 
-        struct ICMPEchoMessage : ICMPHeader {
+        struct ICMPEchoHeader : ICMPHeader {
             uint16_t id;
             uint16_t seq;
+        };
+
+        struct ICMPEchoMessage : ICMPEchoHeader {
             uint8_t data[ICMPLIB_PING_DATA_SIZE];
         };
 
-        struct ICMPRevertedMessage : ICMPHeader {
+        struct ICMPErrorData : ICMPHeader {
             uint32_t unused;
             uint8_t data[ICMPLIB_INET4_ORIGINAL_DATA_SIZE];
         };
+
+        struct IPv4Header {
+            uint8_t version_ihl;
+            uint8_t differentiated_services;
+            uint16_t total_length;
+            uint16_t identification;
+            uint16_t fragment_offset;
+            uint8_t ttl;
+            uint8_t protocol;
+            uint16_t checksum;
+            uint32_t source;
+            uint32_t destination;
+        };
+
+        struct IPv6Header {
+            uint32_t version_class_flow;
+            uint16_t payload_length;
+            uint8_t next_header;
+            uint8_t hop_limit;
+            uint8_t source[16];
+            uint8_t destination[16];
+        };
+
+        struct ClassifyResult {
+            bool matched;
+            Result::ResponseType type;
+            static ClassifyResult Unrelated() { return {false, Result::ResponseType::Timeout}; }
+            static ClassifyResult Accept(Result::ResponseType t) { return {true, t}; }
+        };
+
+        static constexpr unsigned ICMP_ERROR_DATA_OFFSET = sizeof(ICMPHeader) + sizeof(uint32_t);
 
         class ICMPSocket {
         public:
@@ -443,7 +504,8 @@ namespace icmplib {
             ICMPRequest() = delete;
             ICMPRequest(IPAddress::Type protocol, uint16_t sequence = 1) {
                 std::memset(this, 0, sizeof(ICMPEchoMessage));
-                id = rand() % USHRT_MAX;
+                static thread_local std::mt19937 gen(std::random_device{}());
+                id = std::uniform_int_distribution<uint16_t>(0, USHRT_MAX)(gen);
                 type = (protocol != IPAddress::Type::IPv6) ? ICMPLIB_ICMP_ECHO_REQUEST : ICMPLIB_ICMPV6_ECHO_REQUEST;
                 seq = sequence;
                 if (protocol != IPAddress::Type::IPv6) {
@@ -478,7 +540,7 @@ namespace icmplib {
                 timeout_val.tv_usec = (timeout % 1000) * 1000;
 
                 int activity = select(sock + 1, &sock_set, NULL, NULL, &timeout_val);
-                if ((activity <= 0) | !FD_ISSET(sock, &sock_set)) {
+                if ((activity <= 0) || !FD_ISSET(sock, &sock_set)) {
                     return false;
                 }
 
@@ -492,19 +554,19 @@ namespace icmplib {
                 return true;
             };
             template <class T>
-            const T Generate() const {
-                if (sizeof(T) > length) {
+            const T Generate(unsigned offset = 0) const {
+                if (!CanGenerate<T>(offset)) {
                     throw std::runtime_error("Incorrect ICMP packet size!");
                 }
                 T packet;
                 std::memset(&packet, 0, sizeof(T));
                 switch (protocol) {
                 case IPAddress::Type::IPv6:
-                    std::memcpy(&packet, buffer, static_cast<long unsigned>(length) > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length));
+                    std::memcpy(&packet, &buffer[offset], sizeof(T));
                     break;
                 case IPAddress::Type::IPv4:
                 default:
-                    std::memcpy(&packet, &buffer[ICMPLIB_INET4_HEADER_SIZE], static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE > sizeof(T) ? sizeof(T) : static_cast<long unsigned>(length) - ICMPLIB_INET4_HEADER_SIZE);
+                    std::memcpy(&packet, &buffer[ICMPLIB_INET4_HEADER_SIZE + offset], sizeof(T));
                 }
                 return packet;
             }
@@ -535,8 +597,12 @@ namespace icmplib {
                     break;
                 case IPAddress::Type::IPv4:
                 default:
-                    return length - ICMPLIB_INET4_HEADER_SIZE;
+                    return (length > ICMPLIB_INET4_HEADER_SIZE) ? length - ICMPLIB_INET4_HEADER_SIZE : 0;
                 }
+            }
+            template <class T>
+            bool CanGenerate(unsigned offset = 0) const {
+                return (offset <= GetSize()) && (sizeof(T) <= GetSize() - offset);
             }
         private:
             IPAddress::Type protocol;
@@ -545,66 +611,92 @@ namespace icmplib {
             unsigned length;
         };
 
-        static Result::ResponseType GetResponseType(const ICMPRequest &request, ICMPResponse &response) {
-            Result::ResponseType result = Result::ResponseType::Timeout;
-            ICMPEchoMessage echo;
-            ICMPRevertedMessage reverted;
+        static ClassifyResult GetResponseType(const ICMPRequest &request, const IPAddress &target, const IPAddress &source, ICMPResponse &response) {
             switch (response.GetICMPHeader().type) {
             case ICMPLIB_ICMP_ECHO_RESPONSE:
-                result = Result::ResponseType::Success;
-                echo = response.Generate<ICMPEchoMessage>();
-                echo.checksum = 0;
-                if ((response.GetICMPHeader().checksum != SetChecksum<ICMPEchoMessage>(echo)) || (request.id != echo.id)) {
-                    result = Result::ResponseType::Unsupported;
-                }
-                break;
+                return (target == source) ? MatchEchoResponse(request, response) : ClassifyResult::Unrelated();
             case ICMPLIB_ICMP_DESTINATION_UNREACHABLE:
-                result = Result::ResponseType::Unreachable;
+                return MatchIPv4ErrorResponse(request, target, response, Result::ResponseType::Unreachable);
             case ICMPLIB_ICMP_TIME_EXCEEDED:
-                if (result == Result::ResponseType::Timeout) {
-                    result = Result::ResponseType::TimeExceeded;
-                }
-                reverted = response.Generate<ICMPRevertedMessage>();
-                reverted.checksum = 0;
-                if (response.GetICMPHeader().checksum != SetChecksum<ICMPRevertedMessage>(reverted)) {
-                    result = Result::ResponseType::Unsupported;
-                }
-                break;
+                return MatchIPv4ErrorResponse(request, target, response, Result::ResponseType::TimeExceeded);
             case ICMPLIB_ICMP_ECHO_REQUEST:
-                break;
             default:
-                result = Result::ResponseType::Unsupported;
+                return ClassifyResult::Unrelated();
             }
-
-            return result;
         };
 
-        static Result::ResponseType GetResponseTypeV6(const ICMPRequest &request, ICMPResponse &response) {
-            Result::ResponseType result = Result::ResponseType::Timeout;
-            ICMPEchoMessage echo;
+        static ClassifyResult GetResponseTypeV6(const ICMPRequest &request, const IPAddress &target, const IPAddress &source, ICMPResponse &response) {
             switch (response.GetICMPHeader().type) {
             case ICMPLIB_ICMPV6_ECHO_RESPONSE:
-                result = Result::ResponseType::Success;
-                echo = response.Generate<ICMPEchoMessage>();
-                if (request.id != echo.id) {
-                    result = Result::ResponseType::Unsupported;
-                }
-                break;
+                return (target == source) ? MatchEchoResponse(request, response, false) : ClassifyResult::Unrelated();
             case ICMPLIB_ICMPV6_DESTINATION_UNREACHABLE:
-                result = Result::ResponseType::Unreachable;
+                return MatchIPv6ErrorResponse(request, target, response, Result::ResponseType::Unreachable);
             case ICMPLIB_ICMPV6_TIME_EXCEEDED:
-                if (result == Result::ResponseType::Timeout) {
-                    result = Result::ResponseType::TimeExceeded;
-                }
-                break;
+                return MatchIPv6ErrorResponse(request, target, response, Result::ResponseType::TimeExceeded);
             case ICMPLIB_ICMPV6_ECHO_REQUEST:
-                break;
             default:
-                result = Result::ResponseType::Unsupported;
+                return ClassifyResult::Unrelated();
             }
-
-            return result;
         };
+
+        static bool MatchEchoRequest(const ICMPRequest &request, const ICMPEchoHeader &echo, bool verify_checksum = false) {
+            return (request.id == echo.id) && (request.seq == echo.seq) && (!verify_checksum || (request.checksum == echo.checksum));
+        }
+
+        static ClassifyResult MatchEchoResponse(const ICMPRequest &request, ICMPResponse &response, bool verify_checksum = true) {
+            if (!response.CanGenerate<ICMPEchoMessage>()) {
+                return ClassifyResult::Unrelated();
+            }
+            ICMPEchoMessage echo = response.Generate<ICMPEchoMessage>();
+            if (!MatchEchoRequest(request, echo) || std::memcmp(request.data, echo.data, sizeof(request.data)) != 0) {
+                return ClassifyResult::Unrelated();
+            }
+            if (!verify_checksum) {
+                return ClassifyResult::Accept(Result::ResponseType::Success);
+            }
+            echo.checksum = 0;
+            return (response.GetICMPHeader().checksum == SetChecksum<ICMPEchoMessage>(echo))
+                ? ClassifyResult::Accept(Result::ResponseType::Success)
+                : ClassifyResult::Accept(Result::ResponseType::Unsupported);
+        }
+
+        static ClassifyResult MatchIPv4ErrorResponse(const ICMPRequest &request, const IPAddress &target, ICMPResponse &response, Result::ResponseType matched_type) {
+            if (!response.CanGenerate<ICMPErrorData>() || !response.CanGenerate<IPv4Header>(ICMP_ERROR_DATA_OFFSET)) {
+                return ClassifyResult::Unrelated();
+            }
+            ICMPErrorData error_data = response.Generate<ICMPErrorData>();
+            IPv4Header original_ip = response.Generate<IPv4Header>(ICMP_ERROR_DATA_OFFSET);
+            unsigned header_length = static_cast<unsigned>(original_ip.version_ihl & 0x0f) * 4;
+            if ((header_length < ICMPLIB_INET4_HEADER_SIZE) || (original_ip.protocol != IPPROTO_ICMP) || !(target == original_ip.destination)) {
+                return ClassifyResult::Unrelated();
+            }
+            if (!response.CanGenerate<ICMPEchoHeader>(ICMP_ERROR_DATA_OFFSET + header_length)) {
+                return ClassifyResult::Unrelated();
+            }
+            ICMPEchoHeader original_echo = response.Generate<ICMPEchoHeader>(ICMP_ERROR_DATA_OFFSET + header_length);
+            if ((original_echo.type != ICMPLIB_ICMP_ECHO_REQUEST) || !MatchEchoRequest(request, original_echo, true)) {
+                return ClassifyResult::Unrelated();
+            }
+            error_data.checksum = 0;
+            return (response.GetICMPHeader().checksum == SetChecksum<ICMPErrorData>(error_data))
+                ? ClassifyResult::Accept(matched_type)
+                : ClassifyResult::Accept(Result::ResponseType::Unsupported);
+        }
+
+        static ClassifyResult MatchIPv6ErrorResponse(const ICMPRequest &request, const IPAddress &target, ICMPResponse &response, Result::ResponseType matched_type) {
+            if (!response.CanGenerate<IPv6Header>(ICMP_ERROR_DATA_OFFSET) ||
+                !response.CanGenerate<ICMPEchoHeader>(ICMP_ERROR_DATA_OFFSET + ICMPLIB_INET6_HEADER_SIZE)) {
+                return ClassifyResult::Unrelated();
+            }
+            IPv6Header original_ip = response.Generate<IPv6Header>(ICMP_ERROR_DATA_OFFSET);
+            if ((original_ip.next_header != IPPROTO_ICMPV6) || !(target == original_ip.destination)) {
+                return ClassifyResult::Unrelated();
+            }
+            ICMPEchoHeader original_echo = response.Generate<ICMPEchoHeader>(ICMP_ERROR_DATA_OFFSET + ICMPLIB_INET6_HEADER_SIZE);
+            return ((original_echo.type == ICMPLIB_ICMPV6_ECHO_REQUEST) && MatchEchoRequest(request, original_echo))
+                ? ClassifyResult::Accept(matched_type)
+                : ClassifyResult::Unrelated();
+        }
 
         template <class T>
         static uint16_t SetChecksum(T &packet) {

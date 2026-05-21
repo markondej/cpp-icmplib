@@ -50,6 +50,8 @@ Unsupported             | Received unsupported ICMP packet
 Failure                 | Failed to send ICMP Echo Request to given target host
 ```
 
+Packets that do not belong to the active ping request are ignored while waiting for the matching reply. This includes ICMP traffic for other hosts or other processes that may be visible on the raw socket, for example when a NIC is running in promiscuous mode.
+
 ## Examples
 
 In order to make internet connection test simply use:
