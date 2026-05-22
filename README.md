@@ -7,13 +7,14 @@ As this library is socket-based, on most operating systems, it will require admi
 
 icmplib delivers function Ping declared as:
 ```
-PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255);
+PingResult Ping(const icmplib::AddressIP &target, unsigned timeout = 1000, uint16_t sequence = 1, uint8_t ttl = 255, uint16_t packet_size = ICMPLIB_PING_DATA_SIZE);
 ```
 Notice:
-* target - Network address (may be created from std::string)
-* timeout - Timeout in milliseconds
-* sequence - Sequence number to be sent
-* ttl - Time-to-live to be set for packet
+* `target` - Network address (may be created from std::string)
+* `timeout` - Timeout in milliseconds
+* `sequence` - Sequence number to be sent
+* `ttl` - Time-to-live to be set for packet
+* `packet_size` - ICMP echo payload size in bytes (default: ICMPLIB_PING_DATA_SIZE = 64)
 
 PingResult structure is declared as:
 ```

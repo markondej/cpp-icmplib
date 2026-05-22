@@ -5,16 +5,15 @@
 #endif
 
 #ifndef ICMPLIB_RECV_BUFFER_SIZE
-#define ICMPLIB_RECV_BUFFER_SIZE 1024
+#define ICMPLIB_RECV_BUFFER_SIZE 65536
 #endif
 
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <chrono>
 #include <random>
+#include <stdexcept>
 #include <string>
-#include <thread>
-#include <regex>
 #ifdef _WIN32
 #define _WIN32_WINNT 0x0601
 #include <ws2tcpip.h>
@@ -42,6 +41,10 @@
 #define ICMPLIB_INET4_ORIGINAL_DATA_SIZE ICMPLIB_INET4_HEADER_SIZE + 8
 #define ICMPLIB_INET6_HEADER_SIZE 40
 #define ICMPLIB_INET6_ORIGINAL_DATA_SIZE ICMPLIB_INET6_HEADER_SIZE + 8
+
+#ifndef ICMPLIB_MAX_PING_DATA_SIZE
+#define ICMPLIB_MAX_PING_DATA_SIZE (ICMPLIB_RECV_BUFFER_SIZE - ICMPLIB_INET4_HEADER_SIZE - 8)
+#endif
 
 #define ICMPLIB_TIMEOUT_1S 1000
 
@@ -306,10 +309,14 @@ namespace icmplib {
         }
         static bool IsCorrect(const std::string &address, Type type = Type::IPv4) {
             switch (type) {
-            case Type::IPv4:
-                return std::regex_match(address, std::regex("^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"));
-            case Type::IPv6:
-                return std::regex_match(address, std::regex("^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$"));
+            case Type::IPv6: {
+                struct in6_addr addr;
+                return inet_pton(AF_INET6, address.c_str(), &addr) == 1;
+            }
+            case Type::IPv4: {
+                struct in_addr addr;
+                return inet_pton(AF_INET, address.c_str(), &addr) == 1;
+            }
             default:
                 return IsCorrect(address, Type::IPv4) || IsCorrect(address, Type::IPv6);
             }
@@ -347,7 +354,7 @@ namespace icmplib {
         ICMPEcho(const ICMPEcho &) = delete;
         ICMPEcho(ICMPEcho &&) = delete;
         ICMPEcho &operator=(const ICMPEcho &) = delete;
-        static Result Execute(const IPAddress &target, unsigned timeout = ICMPLIB_TIMEOUT_1S, uint16_t sequence = 1, uint8_t ttl = 255) {
+        static Result Execute(const IPAddress &target, unsigned timeout = ICMPLIB_TIMEOUT_1S, uint16_t sequence = 1, uint8_t ttl = 255, uint16_t packet_size = ICMPLIB_PING_DATA_SIZE) {
             Result result = { Result::ResponseType::Timeout, static_cast<double>(timeout), IPAddress(), 0, 0 };
             try {
 #ifdef _WIN32
@@ -355,7 +362,7 @@ namespace icmplib {
 #endif
                 ICMPSocket sock(target.GetType(), ttl);
 
-                ICMPRequest request(target.GetType(), sequence);
+                ICMPRequest request(target.GetType(), sequence, packet_size);
                 request.Send(sock.GetSocket(), target);
                 auto start = std::chrono::high_resolution_clock::now();
                 IPAddress source(target);
@@ -395,6 +402,14 @@ namespace icmplib {
             return result;
         }
     private:
+        struct ClassifyResult {
+            bool matched;
+            Result::ResponseType type;
+            static ClassifyResult Unrelated() { return {false, Result::ResponseType::Timeout}; }
+            static ClassifyResult Accept(Result::ResponseType t) { return {true, t}; }
+        };
+
+#pragma pack(push, 1)
         struct ICMPHeader {
             uint8_t type;
             uint8_t code;
@@ -407,7 +422,7 @@ namespace icmplib {
         };
 
         struct ICMPEchoMessage : ICMPEchoHeader {
-            uint8_t data[ICMPLIB_PING_DATA_SIZE];
+            uint8_t data[ICMPLIB_MAX_PING_DATA_SIZE];
         };
 
         struct ICMPErrorData : ICMPHeader {
@@ -436,13 +451,7 @@ namespace icmplib {
             uint8_t source[16];
             uint8_t destination[16];
         };
-
-        struct ClassifyResult {
-            bool matched;
-            Result::ResponseType type;
-            static ClassifyResult Unrelated() { return {false, Result::ResponseType::Timeout}; }
-            static ClassifyResult Accept(Result::ResponseType t) { return {true, t}; }
-        };
+#pragma pack(pop)
 
         static constexpr unsigned ICMP_ERROR_DATA_OFFSET = sizeof(ICMPHeader) + sizeof(uint32_t);
 
@@ -458,7 +467,7 @@ namespace icmplib {
 #ifdef _WIN32
                 if (sock == INVALID_SOCKET) {
 #else
-                if (sock <= 0) {
+                if (sock < 0) {
 #endif
                     throw std::runtime_error("Cannot initialize socket!");
                 }
@@ -502,22 +511,40 @@ namespace icmplib {
         class ICMPRequest : public ICMPEchoMessage {
         public:
             ICMPRequest() = delete;
-            ICMPRequest(IPAddress::Type protocol, uint16_t sequence = 1) {
-                std::memset(this, 0, sizeof(ICMPEchoMessage));
+            ICMPRequest(IPAddress::Type protocol, uint16_t sequence = 1, uint16_t size = ICMPLIB_PING_DATA_SIZE) {
+                if (size > ICMPLIB_MAX_PING_DATA_SIZE) {
+                    throw std::invalid_argument("Payload size exceeds maximum allowed size!");
+                }
                 static thread_local std::mt19937 gen(std::random_device{}());
-                id = std::uniform_int_distribution<uint16_t>(0, USHRT_MAX)(gen);
+                id = htons(std::uniform_int_distribution<uint16_t>(0, USHRT_MAX)(gen));
                 type = (protocol != IPAddress::Type::IPv6) ? ICMPLIB_ICMP_ECHO_REQUEST : ICMPLIB_ICMPV6_ECHO_REQUEST;
-                seq = sequence;
+                code = 0;
+                checksum = 0;
+                seq = htons(sequence);
+                payload_size = size;
+
+                for (uint16_t i = 0; i < size; ++i) {
+                    data[i] = static_cast<uint8_t>(sequence + i);
+                }
+
                 if (protocol != IPAddress::Type::IPv6) {
-                    SetChecksum<ICMPEchoMessage>(*this);
+                    checksum = ComputeChecksum(this, sizeof(ICMPEchoHeader) + size);
                 }
             }
             void Send(ICMPLIB_SOCKET sock, const IPAddress &address) {
-                int bytes = sendto(sock, reinterpret_cast<char *>(this), sizeof(ICMPEchoMessage), 0, address.GetSockAddr(), address.GetSockAddrLength());
+                int bytes = sendto(sock, reinterpret_cast<const char *>(this), static_cast<int>(sizeof(ICMPEchoHeader) + payload_size), 0, address.GetSockAddr(), address.GetSockAddrLength());
                 if (bytes == ICMPLIB_SOCKET_ERROR) {
                     throw std::runtime_error("Failed to send request!");
                 }
             }
+            const uint8_t *GetPayload() const {
+                return data;
+            }
+            uint16_t GetPayloadSize() const {
+                return payload_size;
+            }
+        private:
+            uint16_t payload_size;
         };
 
         class ICMPResponse {
@@ -604,6 +631,10 @@ namespace icmplib {
             bool CanGenerate(unsigned offset = 0) const {
                 return (offset <= GetSize()) && (sizeof(T) <= GetSize() - offset);
             }
+            const uint8_t *GetICMPData(unsigned offset = 0) const {
+                unsigned base = (protocol == IPAddress::Type::IPv6) ? 0 : ICMPLIB_INET4_HEADER_SIZE;
+                return buffer + base + offset;
+            }
         private:
             IPAddress::Type protocol;
             uint8_t buffer[ICMPLIB_RECV_BUFFER_SIZE];
@@ -644,18 +675,22 @@ namespace icmplib {
         }
 
         static ClassifyResult MatchEchoResponse(const ICMPRequest &request, ICMPResponse &response, bool verify_checksum = true) {
-            if (!response.CanGenerate<ICMPEchoMessage>()) {
+            uint16_t payload_size = request.GetPayloadSize();
+            size_t expected_size = sizeof(ICMPEchoHeader) + payload_size;
+            if (response.GetSize() < expected_size) {
                 return ClassifyResult::Unrelated();
             }
-            ICMPEchoMessage echo = response.Generate<ICMPEchoMessage>();
-            if (!MatchEchoRequest(request, echo) || std::memcmp(request.data, echo.data, sizeof(request.data)) != 0) {
+            ICMPEchoHeader echo = response.Generate<ICMPEchoHeader>();
+            if (!MatchEchoRequest(request, echo)) {
+                return ClassifyResult::Unrelated();
+            }
+            if (std::memcmp(request.GetPayload(), response.GetICMPData(sizeof(ICMPEchoHeader)), payload_size) != 0) {
                 return ClassifyResult::Unrelated();
             }
             if (!verify_checksum) {
                 return ClassifyResult::Accept(Result::ResponseType::Success);
             }
-            echo.checksum = 0;
-            return (response.GetICMPHeader().checksum == SetChecksum<ICMPEchoMessage>(echo))
+            return (ComputeChecksum(response.GetICMPData(), expected_size) == 0)
                 ? ClassifyResult::Accept(Result::ResponseType::Success)
                 : ClassifyResult::Accept(Result::ResponseType::Unsupported);
         }
@@ -678,7 +713,7 @@ namespace icmplib {
                 return ClassifyResult::Unrelated();
             }
             error_data.checksum = 0;
-            return (response.GetICMPHeader().checksum == SetChecksum<ICMPErrorData>(error_data))
+            return (response.GetICMPHeader().checksum == ComputeChecksum(&error_data, sizeof(error_data)))
                 ? ClassifyResult::Accept(matched_type)
                 : ClassifyResult::Accept(Result::ResponseType::Unsupported);
         }
@@ -698,28 +733,26 @@ namespace icmplib {
                 : ClassifyResult::Unrelated();
         }
 
-        template <class T>
-        static uint16_t SetChecksum(T &packet) {
-            uint16_t *element = reinterpret_cast<uint16_t *>(&packet);
-            unsigned long size = sizeof(T);
+        static uint16_t ComputeChecksum(const void *data, size_t size) {
+            const uint16_t *element = reinterpret_cast<const uint16_t *>(data);
             uint32_t sum = 0;
-            for (; size > 1; size -= 2) {
+            size_t remaining = size;
+            for (; remaining > 1; remaining -= 2) {
                 sum += *element++;
             }
-            if (size > 0) {
-                sum += *reinterpret_cast<uint8_t *>(element);
+            if (remaining > 0) {
+                sum += *reinterpret_cast<const uint8_t *>(element);
             }
             sum = (sum >> 16) + (sum & 0xffff);
             sum += (sum >> 16);
-            packet.checksum = static_cast<uint16_t>(~sum);
-            return packet.checksum;
-        };
+            return static_cast<uint16_t>(~sum);
+        }
     };
 
     using PingResult = ICMPEcho::Result;
     using PingResponseType = ICMPEcho::Result::ResponseType;
 
-    inline PingResult Ping(const IPAddress &target, unsigned timeout = ICMPLIB_TIMEOUT_1S, uint16_t sequence = 1, uint8_t ttl = 255) {
-        return ICMPEcho::Execute(target, timeout, sequence, ttl);
+    inline PingResult Ping(const IPAddress &target, unsigned timeout = ICMPLIB_TIMEOUT_1S, uint16_t sequence = 1, uint8_t ttl = 255, uint16_t packet_size = ICMPLIB_PING_DATA_SIZE) {
+        return ICMPEcho::Execute(target, timeout, sequence, ttl, packet_size);
     }
 }

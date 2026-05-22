@@ -4,23 +4,43 @@
 int main(int argc, char *argv[])
 {
     std::string address = "8.8.8.8", resolved;
-    if (argc > 1) { address = argv[1]; }
+    uint16_t packet_size = ICMPLIB_PING_DATA_SIZE;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-l" && i + 1 < argc) {
+            try {
+                int size = std::stoi(argv[++i]);
+                if (size < 0 || size > ICMPLIB_MAX_PING_DATA_SIZE) {
+                    std::cerr << "Packet size must be between 0 and " << ICMPLIB_MAX_PING_DATA_SIZE << "." << std::endl;
+                    return EXIT_FAILURE;
+                }
+                packet_size = static_cast<uint16_t>(size);
+            } catch (...) {
+                std::cerr << "Invalid packet size value." << std::endl;
+                return EXIT_FAILURE;
+            }
+        } else {
+            address = arg;
+        }
+    }
+
     try {
         if (!icmplib::IPAddress::IsCorrect(address, icmplib::IPAddress::Type::Unknown)) {
             resolved = address; address = icmplib::IPAddress(address);
         }
     } catch (...) {
-        std::cout << "Ping request could not find host " << address << ". Please check the name and try again." << std::endl;
-        return 1;
+        std::cerr << "Ping request could not find host " << address << ". Please check the name and try again." << std::endl;
+        return EXIT_FAILURE;
     }
 
     int ret = EXIT_SUCCESS;
     std::cout << "Pinging " << (resolved.empty() ? address : resolved + " [" + address + "]")
-              << " with " << ICMPLIB_PING_DATA_SIZE << " bytes of data:" << std::endl;
-    auto result = icmplib::Ping(address, ICMPLIB_TIMEOUT_1S);
+              << " with " << packet_size << " bytes of data:" << std::endl;
+    auto result = icmplib::Ping(address, ICMPLIB_TIMEOUT_1S, 1, 255, packet_size);
     switch (result.response) {
     case icmplib::PingResponseType::Failure:
-        std::cout << "Network error." << std::endl;
+        std::cerr << "Network error." << std::endl;
         ret = EXIT_FAILURE;
         break;
     case icmplib::PingResponseType::Timeout:
