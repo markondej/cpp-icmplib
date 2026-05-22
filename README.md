@@ -34,11 +34,11 @@ struct PingResult {
 };
 ```
 Notice:
-* delay - Time in miliseconds between sending request and receiving response
-* address - Address of responding host
-* code - ICMP Code parameter
-* ttl - Received IPv4 header TTL parameter 
-* response - Type of received response
+* `delay` - Time in miliseconds between sending request and receiving response
+* `address` - Address of responding host
+* `code` - ICMP Code parameter
+* `ttl` - Received IPv4 header TTL parameter 
+* `response` - Type of received response
 
 ```
 ResponseType            | Meaning
