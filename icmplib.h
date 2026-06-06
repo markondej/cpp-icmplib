@@ -566,7 +566,7 @@ namespace icmplib {
                 timeout_val.tv_sec = timeout / 1000;
                 timeout_val.tv_usec = (timeout % 1000) * 1000;
 
-                int activity = select(sock + 1, &sock_set, NULL, NULL, &timeout_val);
+                int activity = select(static_cast<int>(sock) + 1, &sock_set, NULL, NULL, &timeout_val);
                 if ((activity <= 0) || !FD_ISSET(sock, &sock_set)) {
                     return false;
                 }
