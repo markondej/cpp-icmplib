@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <cerrno>
 #endif
 
 #define ICMPLIB_ICMP_ECHO_RESPONSE 0
@@ -369,7 +370,7 @@ namespace icmplib {
 
                 while (true) {
                     ICMPResponse response;
-                    bool recv = response.Receive(sock.GetSocket(), source, timeout);
+                    bool recv = response.Receive(sock.GetSocket(), source, timeout, sock.GetSocketType());
                     auto end = std::chrono::high_resolution_clock::now();
                     if (!recv) {
                         unsigned delta = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
@@ -455,6 +456,11 @@ namespace icmplib {
 
         static constexpr unsigned ICMP_ERROR_DATA_OFFSET = sizeof(ICMPHeader) + sizeof(uint32_t);
 
+        enum class SocketType {
+            Raw,
+            Datagram
+        };
+
         class ICMPSocket {
         public:
             ICMPSocket(IPAddress::Type type, uint8_t ttl) {
@@ -463,7 +469,14 @@ namespace icmplib {
                     protocol = IPPROTO_ICMPV6;
                 }
 
+                socket_type = SocketType::Raw;
                 sock = socket(IPAddress::GetFamily(type), SOCK_RAW, protocol);
+#ifdef __linux__
+                if ((sock < 0) && ((errno == EPERM) || (errno == EACCES))) {
+                    sock = socket(IPAddress::GetFamily(type), SOCK_DGRAM, protocol);
+                    socket_type = SocketType::Datagram;
+                }
+#endif
 #ifdef _WIN32
                 if (sock == INVALID_SOCKET) {
 #else
@@ -506,8 +519,12 @@ namespace icmplib {
             const ICMPLIB_SOCKET &GetSocket() {
                 return sock;
             }
+            SocketType GetSocketType() const {
+                return socket_type;
+            }
         private:
             ICMPLIB_SOCKET sock;
+            SocketType socket_type;
         };
 
         class ICMPRequest : public ICMPEchoMessage {
@@ -551,7 +568,7 @@ namespace icmplib {
 
         class ICMPResponse {
         public:
-            ICMPResponse() : protocol(IPAddress::Type::IPv4), header(nullptr), length(0) {
+            ICMPResponse() : protocol(IPAddress::Type::IPv4), socket_type(SocketType::Raw), header(nullptr), length(0) {
                 std::memset(&buffer, 0, sizeof(uint8_t) * ICMPLIB_RECV_BUFFER_SIZE);
             }
             virtual ~ICMPResponse() {
@@ -559,7 +576,7 @@ namespace icmplib {
                     delete header;
                 }
             }
-            bool Receive(ICMPLIB_SOCKET sock, IPAddress &address, unsigned timeout) {
+            bool Receive(ICMPLIB_SOCKET sock, IPAddress &address, unsigned timeout, SocketType socket_type) {
                 fd_set sock_set;
                 FD_ZERO(&sock_set);
                 FD_SET(sock, &sock_set);
@@ -579,6 +596,7 @@ namespace icmplib {
                     return false;
                 }
                 this->length = static_cast<unsigned>(bytes);
+                this->socket_type = socket_type;
                 protocol = address.GetType();
                 return true;
             };
@@ -589,14 +607,7 @@ namespace icmplib {
                 }
                 T packet;
                 std::memset(&packet, 0, sizeof(T));
-                switch (protocol) {
-                case IPAddress::Type::IPv6:
-                    std::memcpy(&packet, &buffer[offset], sizeof(T));
-                    break;
-                case IPAddress::Type::IPv4:
-                default:
-                    std::memcpy(&packet, &buffer[ICMPLIB_INET4_HEADER_SIZE + offset], sizeof(T));
-                }
+                std::memcpy(&packet, &buffer[GetHeaderOffset() + offset], sizeof(T));
                 return packet;
             }
             const ICMPHeader &GetICMPHeader() {
@@ -610,35 +621,32 @@ namespace icmplib {
                 return protocol;
             }
             uint8_t GetTTL() const {
-                switch (protocol) {
-                case IPAddress::Type::IPv6:
+                if (GetHeaderOffset() == 0) {
                     return 0;
-                    break;
-                case IPAddress::Type::IPv4:
-                default:
-                    return buffer[ICMPLIB_INET4_TTL_OFFSET];
                 }
+                return buffer[ICMPLIB_INET4_TTL_OFFSET];
             }
             unsigned GetSize() const {
-                switch (protocol) {
-                case IPAddress::Type::IPv6:
-                    return length;
-                    break;
-                case IPAddress::Type::IPv4:
-                default:
-                    return (length > ICMPLIB_INET4_HEADER_SIZE) ? length - ICMPLIB_INET4_HEADER_SIZE : 0;
-                }
+                unsigned offset = GetHeaderOffset();
+                return (length > offset) ? length - offset : 0;
             }
             template <class T>
             bool CanGenerate(unsigned offset = 0) const {
                 return (offset <= GetSize()) && (sizeof(T) <= GetSize() - offset);
             }
             const uint8_t *GetICMPData(unsigned offset = 0) const {
-                unsigned base = (protocol == IPAddress::Type::IPv6) ? 0 : ICMPLIB_INET4_HEADER_SIZE;
-                return buffer + base + offset;
+                return buffer + GetHeaderOffset() + offset;
+            }
+            SocketType GetSocketType() const {
+                return socket_type;
+            }
+            unsigned GetHeaderOffset() const {
+                return ((protocol == IPAddress::Type::IPv6) || (socket_type == SocketType::Datagram))
+                    ? 0 : ICMPLIB_INET4_HEADER_SIZE;
             }
         private:
             IPAddress::Type protocol;
+            SocketType socket_type;
             uint8_t buffer[ICMPLIB_RECV_BUFFER_SIZE];
             ICMPHeader *header;
             unsigned length;
@@ -672,7 +680,10 @@ namespace icmplib {
             }
         };
 
-        static bool MatchEchoRequest(const ICMPRequest &request, const ICMPEchoHeader &echo, bool verify_checksum = false) {
+        static bool MatchEchoRequest(const ICMPRequest &request, const ICMPEchoHeader &echo, SocketType socket_type, bool verify_checksum = false) {
+            if (socket_type == SocketType::Datagram) {
+                return request.seq == echo.seq;
+            }
             return (request.id == echo.id) && (request.seq == echo.seq) && (!verify_checksum || (request.checksum == echo.checksum));
         }
 
@@ -683,7 +694,7 @@ namespace icmplib {
                 return ClassifyResult::Unrelated();
             }
             ICMPEchoHeader echo = response.Generate<ICMPEchoHeader>();
-            if (!MatchEchoRequest(request, echo)) {
+            if (!MatchEchoRequest(request, echo, response.GetSocketType())) {
                 return ClassifyResult::Unrelated();
             }
             if (std::memcmp(request.GetPayload(), response.GetICMPData(sizeof(ICMPEchoHeader)), payload_size) != 0) {
@@ -711,7 +722,7 @@ namespace icmplib {
                 return ClassifyResult::Unrelated();
             }
             ICMPEchoHeader original_echo = response.Generate<ICMPEchoHeader>(ICMP_ERROR_DATA_OFFSET + header_length);
-            if ((original_echo.type != ICMPLIB_ICMP_ECHO_REQUEST) || !MatchEchoRequest(request, original_echo, true)) {
+            if ((original_echo.type != ICMPLIB_ICMP_ECHO_REQUEST) || !MatchEchoRequest(request, original_echo, response.GetSocketType(), true)) {
                 return ClassifyResult::Unrelated();
             }
             error_data.checksum = 0;
@@ -730,7 +741,7 @@ namespace icmplib {
                 return ClassifyResult::Unrelated();
             }
             ICMPEchoHeader original_echo = response.Generate<ICMPEchoHeader>(ICMP_ERROR_DATA_OFFSET + ICMPLIB_INET6_HEADER_SIZE);
-            return ((original_echo.type == ICMPLIB_ICMPV6_ECHO_REQUEST) && MatchEchoRequest(request, original_echo))
+            return ((original_echo.type == ICMPLIB_ICMPV6_ECHO_REQUEST) && MatchEchoRequest(request, original_echo, response.GetSocketType()))
                 ? ClassifyResult::Accept(matched_type)
                 : ClassifyResult::Unrelated();
         }
