@@ -14,6 +14,8 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <cstring>
+#include <climits>
 #ifdef _WIN32
 #define _WIN32_WINNT 0x0601
 #include <ws2tcpip.h>
@@ -23,8 +25,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <netdb.h>
-#include <cstring>
-#include <climits>
 #endif
 
 #define ICMPLIB_ICMP_ECHO_RESPONSE 0
