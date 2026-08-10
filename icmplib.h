@@ -8,6 +8,10 @@
 #define ICMPLIB_RECV_BUFFER_SIZE 65536
 #endif
 
+#ifndef ICMPLIB_ERROR_QUEUE_CONTROL_SIZE
+#define ICMPLIB_ERROR_QUEUE_CONTROL_SIZE 512
+#endif
+
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <chrono>
@@ -26,6 +30,9 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <cerrno>
+#endif
+#ifdef __linux__
+#include <linux/errqueue.h>
 #endif
 
 #define ICMPLIB_ICMP_ECHO_RESPONSE 0
@@ -373,6 +380,18 @@ namespace icmplib {
                     bool recv = response.Receive(sock.GetSocket(), source, timeout, sock.GetSocketType());
                     auto end = std::chrono::high_resolution_clock::now();
                     if (!recv) {
+#ifdef __linux__
+                        Result::ResponseType error_type = Result::ResponseType::Failure;
+                        uint8_t error_code = 0;
+                        if ((sock.GetSocketType() == SocketType::Datagram)
+                            && ReceiveSocketError(sock.GetSocket(), source, error_type, error_code)) {
+                            result.response = error_type;
+                            result.delay = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.0;
+                            result.address = source;
+                            result.code = error_code;
+                            break;
+                        }
+#endif
                         unsigned delta = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
                         if (delta >= timeout) {
                             break;
@@ -502,6 +521,17 @@ namespace icmplib {
                     }
                 }
 
+#ifdef __linux__
+                if (socket_type == SocketType::Datagram) {
+                    int enabled = 1;
+                    int level = (type == IPAddress::Type::IPv6) ? IPPROTO_IPV6 : IPPROTO_IP;
+                    int option = (type == IPAddress::Type::IPv6) ? IPV6_RECVERR : IP_RECVERR;
+                    if (setsockopt(sock, level, option, &enabled, sizeof(enabled)) == ICMPLIB_SOCKET_ERROR) {
+                        ICMPLIB_CLOSESOCKET(sock);
+                        throw std::runtime_error("Cannot set socket options!");
+                    }
+                }
+#endif
 #ifdef _WIN32
                 unsigned long mode = 1;
                 if (ioctlsocket(sock, FIONBIO, &mode) != NO_ERROR) {
@@ -679,6 +709,70 @@ namespace icmplib {
                 return ClassifyResult::Unrelated();
             }
         };
+
+#ifdef __linux__
+        static bool ReceiveSocketError(ICMPLIB_SOCKET sock, IPAddress &source, Result::ResponseType &type, uint8_t &code) {
+            uint8_t data[ICMPLIB_ERROR_QUEUE_CONTROL_SIZE];
+            char control[ICMPLIB_ERROR_QUEUE_CONTROL_SIZE];
+
+            iovec buffer;
+            buffer.iov_base = data;
+            buffer.iov_len = sizeof(data);
+
+            msghdr message;
+            std::memset(&message, 0, sizeof(message));
+            message.msg_iov = &buffer;
+            message.msg_iovlen = 1;
+            message.msg_control = control;
+            message.msg_controllen = sizeof(control);
+
+            if (recvmsg(sock, &message, MSG_ERRQUEUE | MSG_DONTWAIT) < 0) {
+                return false;
+            }
+
+            for (cmsghdr *header = CMSG_FIRSTHDR(&message); header != NULL; header = CMSG_NXTHDR(&message, header)) {
+                bool inet4 = (header->cmsg_level == IPPROTO_IP) && (header->cmsg_type == IP_RECVERR);
+                bool inet6 = (header->cmsg_level == IPPROTO_IPV6) && (header->cmsg_type == IPV6_RECVERR);
+                if (!inet4 && !inet6) {
+                    continue;
+                }
+
+                sock_extended_err *error = reinterpret_cast<sock_extended_err *>(CMSG_DATA(header));
+                if (error->ee_origin == SO_EE_ORIGIN_ICMP) {
+                    if (error->ee_type == ICMPLIB_ICMP_TIME_EXCEEDED) {
+                        type = Result::ResponseType::TimeExceeded;
+                    } else if (error->ee_type == ICMPLIB_ICMP_DESTINATION_UNREACHABLE) {
+                        type = Result::ResponseType::Unreachable;
+                    } else {
+                        continue;
+                    }
+                } else if (error->ee_origin == SO_EE_ORIGIN_ICMP6) {
+                    if (error->ee_type == ICMPLIB_ICMPV6_TIME_EXCEEDED) {
+                        type = Result::ResponseType::TimeExceeded;
+                    } else if (error->ee_type == ICMPLIB_ICMPV6_DESTINATION_UNREACHABLE) {
+                        type = Result::ResponseType::Unreachable;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
+                code = error->ee_code;
+                sockaddr *offender = SO_EE_OFFENDER(error);
+                if (offender->sa_family == AF_INET) {
+                    source = IPAddress(ntohl(reinterpret_cast<sockaddr_in *>(offender)->sin_addr.s_addr));
+                } else if (offender->sa_family == AF_INET6) {
+                    char text[INET6_ADDRSTRLEN];
+                    if (inet_ntop(AF_INET6, &reinterpret_cast<sockaddr_in6 *>(offender)->sin6_addr, text, INET6_ADDRSTRLEN) != NULL) {
+                        source = IPAddress(text, IPAddress::Type::IPv6);
+                    }
+                }
+                return true;
+            }
+            return false;
+        }
+#endif
 
         static bool MatchEchoRequest(const ICMPRequest &request, const ICMPEchoHeader &echo, SocketType socket_type, bool verify_checksum = false) {
             if (socket_type == SocketType::Datagram) {
