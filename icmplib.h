@@ -473,12 +473,14 @@ namespace icmplib {
                 }
 
                 switch (type) {
-                case IPAddress::Type::IPv6:
-                    if (setsockopt(sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
+                case IPAddress::Type::IPv6: {
+                    int hop_limit = ttl;
+                    if (setsockopt(sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, reinterpret_cast<char *>(&hop_limit), sizeof(hop_limit)) == ICMPLIB_SOCKET_ERROR) {
                         ICMPLIB_CLOSESOCKET(sock);
                         throw std::runtime_error("Cannot set socket options!");
                     }
                     break;
+                }
                 case IPAddress::Type::IPv4:
                 default:
                     if (setsockopt(sock, IPPROTO_IP, IP_TTL, reinterpret_cast<char *>(&ttl), sizeof(uint8_t)) == ICMPLIB_SOCKET_ERROR) {
