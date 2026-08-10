@@ -713,7 +713,7 @@ namespace icmplib {
 #ifdef __linux__
         static bool ReceiveSocketError(ICMPLIB_SOCKET sock, IPAddress &source, Result::ResponseType &type, uint8_t &code) {
             uint8_t data[ICMPLIB_ERROR_QUEUE_CONTROL_SIZE];
-            char control[ICMPLIB_ERROR_QUEUE_CONTROL_SIZE];
+            alignas(cmsghdr) char control[ICMPLIB_ERROR_QUEUE_CONTROL_SIZE];
 
             iovec buffer;
             buffer.iov_base = data;
